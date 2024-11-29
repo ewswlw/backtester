@@ -1,0 +1,22 @@
+sprds:
+  field: "INDEX_OAS_TSY_BP"
+  securities:
+    - ticker: "I05510CA Index"
+      custom_name: "cad_ig_oas"
+    - ticker: "LUACTRUU Index"
+      custom_name: "us_ig_oas"
+
+derv:
+  field: "ROLL_ADJUSTED_MID_PRICE"
+  securities:
+    - ticker: "IBOXUMAE MKIT Curncy"
+      custom_name: "cdx_ig"
+    - ticker: "IBOXHYSE MKIT Curncy"
+      custom_name: "cdx_hy"
+
+# Default settings
+settings:
+  default_start_date: "2020-01-01"
+  default_end_date: ""  # Empty means today
+  data_directory: "data"
+  log_directory: "logs"

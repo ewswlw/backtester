@@ -1,0 +1,63 @@
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  detailed:
+    format: '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+  simple:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+
+handlers:
+  data_pipeline:
+    class: logging.FileHandler
+    level: INFO
+    formatter: detailed
+    filename: logs/data_pipeline.log
+    mode: a
+    encoding: utf8
+  
+  bloomberg:
+    class: logging.FileHandler
+    level: INFO
+    formatter: detailed
+    filename: logs/bloomberg.log
+    mode: a
+    encoding: utf8
+  
+  validation:
+    class: logging.FileHandler
+    level: INFO
+    formatter: detailed
+    filename: logs/validation.log
+    mode: a
+    encoding: utf8
+  
+  error:
+    class: logging.FileHandler
+    level: ERROR
+    formatter: detailed
+    filename: logs/error.log
+    mode: a
+    encoding: utf8
+
+loggers:
+  data_pipeline:
+    level: INFO
+    handlers: [data_pipeline, error]
+    propagate: false
+  
+  bloomberg:
+    level: INFO
+    handlers: [bloomberg, error]
+    propagate: false
+  
+  validation:
+    level: INFO
+    handlers: [validation, error]
+    propagate: false
+
+root:
+  level: INFO
+  handlers: [error]
