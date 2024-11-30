@@ -1,14 +1,27 @@
+import os
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-import sys
-import os
 from pathlib import Path
+import logging
+from datetime import datetime
+import sys
+
+# Add the project root to the Python path
+project_root = Path(__file__).parent.parent
+sys.path.append(str(project_root))
+
+# Now import our local modules
+from src.utils.csv_exporter import export_table_to_csv, read_csv_to_df
+from src.utils.validation import validate_dataframe, handle_missing_values
+
 import yaml
 import matplotlib.pyplot as plt
-import logging
 import logging.config
 import json
+from typing import Tuple
+from xbbg import blp
+import sys
+from datetime import datetime, timedelta
 
 # Set up plotting style
 plt.style.use('default')
@@ -18,12 +31,10 @@ plt.rcParams['axes.grid'] = True
 plt.rcParams['grid.alpha'] = 0.3
 plt.rcParams['lines.linewidth'] = 1.5
 
-# Add the project root to the Python path
-project_root = Path(__file__).parent.parent
-sys.path.append(str(project_root))
-
-from src.utils.csv_exporter import export_table_to_csv, export_tables_to_csv
-from src.core.bloomberg_fetcher import BloombergDataFetcher
+# Configure logging
+logging.basicConfig(level=logging.INFO,
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def setup_logging():
     """Set up logging configuration."""
@@ -31,9 +42,17 @@ def setup_logging():
     if config_path.exists():
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+            # Modify log file paths to use absolute paths
+            for handler in config['handlers'].values():
+                if 'filename' in handler:
+                    handler['filename'] = str(project_root / 'logs' / Path(handler['filename']).name)
             logging.config.dictConfig(config)
     else:
         logging.basicConfig(level=logging.INFO)
+    
+    # Create logs directory if it doesn't exist
+    logs_dir = project_root / 'logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
     
     # Create loggers for different components
     data_pipeline_logger = logging.getLogger('data_pipeline')
@@ -42,7 +61,7 @@ def setup_logging():
     
     return data_pipeline_logger, bloomberg_logger, validation_logger
 
-def load_config():
+def load_config() -> dict:
     """Load configuration from YAML file."""
     config_path = project_root / 'config' / 'config.yaml'
     with open(config_path, 'r') as f:
@@ -81,6 +100,57 @@ def print_dataframe_info(df, name, validation_logger):
             }
             validation_logger.info(f"Column {col} statistics: {json.dumps(stats, indent=2)}")
 
+def print_dataframe_validation(df, name):
+    """Print comprehensive validation information about a DataFrame."""
+    print(f"\n{'='*50}")
+    print(f"Data Validation for: {name}")
+    print(f"{'='*50}")
+    
+    # Basic info
+    print("\nDataFrame Info:")
+    print("-" * 20)
+    df.info()
+    
+    # First and last rows
+    print("\nFirst 10 rows:")
+    print("-" * 20)
+    print(df.head(10))
+    
+    print("\nLast 10 rows:")
+    print("-" * 20)
+    print(df.tail(10))
+    
+    # Statistical description
+    print("\nDescriptive Statistics:")
+    print("-" * 20)
+    print(df.describe())
+    
+    # Missing values check
+    missing = df.isnull().sum()
+    if missing.any():
+        print("\nMissing Values:")
+        print("-" * 20)
+        print(missing[missing > 0])
+    
+    # Duplicates check
+    duplicates = df.duplicated().sum()
+    if duplicates > 0:
+        print(f"\nWarning: Found {duplicates} duplicate rows")
+    
+    # Data range check
+    print("\nData Range for each column:")
+    print("-" * 20)
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            print(f"{col}:")
+            print(f"  Min: {df[col].min()}")
+            print(f"  Max: {df[col].max()}")
+            print(f"  Range: {df[col].max() - df[col].min()}")
+    
+    print("\nUnique values count per column:")
+    print("-" * 20)
+    print(df.nunique())
+
 def plot_historical_data(df, name, output_dir, data_pipeline_logger):
     """Create and save historical line charts for all numeric columns."""
     data_pipeline_logger.info(f"Creating historical chart for {name}")
@@ -102,102 +172,175 @@ def plot_historical_data(df, name, output_dir, data_pipeline_logger):
         plt.grid(True)
         plt.tight_layout()
         
+        # Use consistent filename without timestamp
         plot_path = os.path.join(output_dir, f"{name}_historical.png")
         plt.savefig(plot_path)
         plt.close()
         
         data_pipeline_logger.info(f"Historical chart saved to: {plot_path}")
+        return plot_path
     except Exception as e:
         data_pipeline_logger.error(f"Error creating historical chart for {name}: {str(e)}")
         raise
 
-def fetch_bloomberg_data(config, bloomberg_logger):
-    """Fetch Bloomberg data based on config."""
-    bloomberg_logger.info("Starting Bloomberg data fetch")
-    bloomberg_logger.info(f"Configuration: {json.dumps(config['settings'], indent=2)}")
+def fetch_bloomberg_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Fetch data from Bloomberg based on config and ensure it has a DatetimeIndex.
     
-    try:
-        # Create Bloomberg fetcher with config
-        fetcher = BloombergDataFetcher(
-            tickers=[],  # Empty because we're using config-based approach
-            fields=[],   # Empty because we're using config-based approach
-            start_date=config['settings']['default_start_date'],
-            end_date=config['settings']['default_end_date'],
-            logger=bloomberg_logger,
-            config=config
-        )
+    Args:
+        config (dict): Configuration dictionary with Bloomberg settings
         
-        # Fetch and process data
-        data = fetcher.run_pipeline()
-        bloomberg_logger.info("Bloomberg data fetch completed successfully")
-        return data
-    except Exception as e:
-        bloomberg_logger.error(f"Error fetching Bloomberg data: {str(e)}")
-        raise
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: Spreads data and derivatives data with DatetimeIndex
+    """
+    # Get date range
+    start_date = config['settings']['default_start_date']
+    end_date = config['settings']['default_end_date'] or datetime.now().strftime('%Y-%m-%d')
+    
+    # Fetch spreads data
+    spreads_tickers = [sec['ticker'] for sec in config['sprds']['securities']]
+    spreads_data = blp.bdh(
+        tickers=spreads_tickers,
+        flds=[config['sprds']['field']],
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    # Remove the field name from multi-index columns and keep only the ticker
+    spreads_data.columns = spreads_data.columns.get_level_values(0)
+    
+    # Rename columns to custom names
+    spreads_mapping = {
+        sec['ticker']: sec['custom_name']
+        for sec in config['sprds']['securities']
+    }
+    spreads_data = spreads_data.rename(columns=spreads_mapping)
+    
+    # Ensure DatetimeIndex
+    if not isinstance(spreads_data.index, pd.DatetimeIndex):
+        spreads_data.index = pd.to_datetime(spreads_data.index)
+    
+    # Fetch derivatives data
+    derv_tickers = [sec['ticker'] for sec in config['derv']['securities']]
+    derivatives_data = blp.bdh(
+        tickers=derv_tickers,
+        flds=[config['derv']['field']],
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    # Remove the field name from multi-index columns and keep only the ticker
+    derivatives_data.columns = derivatives_data.columns.get_level_values(0)
+    
+    # Rename columns to custom names
+    derv_mapping = {
+        sec['ticker']: sec['custom_name']
+        for sec in config['derv']['securities']
+    }
+    derivatives_data = derivatives_data.rename(columns=derv_mapping)
+    
+    # Ensure DatetimeIndex
+    if not isinstance(derivatives_data.index, pd.DatetimeIndex):
+        derivatives_data.index = pd.to_datetime(derivatives_data.index)
+    
+    return spreads_data, derivatives_data
+
+def read_csv_to_df(file_path: Path, date_column: str = 'Date') -> pd.DataFrame:
+    """
+    Read a CSV file into a DataFrame and set the date column as the index.
+    
+    Args:
+        file_path (Path): Path to the CSV file
+        date_column (str): Name of the date column to use as index. Defaults to 'Date'
+    
+    Returns:
+        pd.DataFrame: DataFrame with DatetimeIndex
+    """
+    # Read CSV
+    df = pd.read_csv(file_path)
+    
+    # Convert date column to datetime and set as index
+    if date_column in df.columns:
+        df[date_column] = pd.to_datetime(df[date_column])
+        df.set_index(date_column, inplace=True)
+    
+    return df
 
 def main():
+    """Main function to run the example."""
     # Set up logging
     data_pipeline_logger, bloomberg_logger, validation_logger = setup_logging()
-    data_pipeline_logger.info("Starting data export pipeline")
     
     try:
         # Load configuration
         config = load_config()
-        data_pipeline_logger.info(f"Configuration loaded: {json.dumps(config['settings'], indent=2)}")
+        data_pipeline_logger.info("Configuration loaded successfully")
         
-        # Create output directory for data and plots
-        output_dir = project_root / config['settings']['data_directory'] / 'test_exports'
-        output_dir.mkdir(parents=True, exist_ok=True)
-        data_pipeline_logger.info(f"Output directory created: {output_dir}")
+        # Create output directories
+        data_dir = project_root / config['settings']['data_directory']
+        plots_dir = project_root / 'plots'
+        data_dir.mkdir(parents=True, exist_ok=True)
+        plots_dir.mkdir(parents=True, exist_ok=True)
         
-        # Fetch Bloomberg data
-        data_pipeline_logger.info("Initiating Bloomberg data fetch")
-        market_data = fetch_bloomberg_data(config, bloomberg_logger)
+        # Fetch data from Bloomberg
+        spreads_data, derivatives_data = fetch_bloomberg_data(config)
+        data_pipeline_logger.info("Bloomberg data fetched successfully")
         
-        # Split data into spreads and derivatives
-        spreads_cols = ['cad_ig_oas', 'us_ig_oas']
-        derv_cols = ['cdx_ig', 'cdx_hy']
+        print("\nSpreads Data after Bloomberg fetch:")
+        print("----------------------------------")
+        spreads_data.info()
         
-        spreads_data = market_data[spreads_cols].copy()
-        derivatives_data = market_data[derv_cols].copy()
+        print("\nDerivatives Data after Bloomberg fetch:")
+        print("----------------------------------")
+        derivatives_data.info()
         
-        # Add Date column for CSV export
-        spreads_data = spreads_data.reset_index()
-        derivatives_data = derivatives_data.reset_index()
+        # Export to CSV
+        spreads_output = data_dir / 'spreads_data.csv'
+        derivatives_output = data_dir / 'derivatives_data.csv'
         
-        # Validate data
-        validation_logger.info("Starting data validation")
-        print_dataframe_info(spreads_data, "Spreads Data", validation_logger)
-        print_dataframe_info(derivatives_data, "Derivatives Data", validation_logger)
+        export_table_to_csv(spreads_data, spreads_output)
+        export_table_to_csv(derivatives_data, derivatives_output)
+        data_pipeline_logger.info("Data exported to CSV successfully")
         
-        # Create visualizations
-        data_pipeline_logger.info("Creating visualizations")
-        plot_historical_data(spreads_data.set_index('index'), "spreads_data", output_dir, data_pipeline_logger)
-        plot_historical_data(derivatives_data.set_index('index'), "derivatives_data", output_dir, data_pipeline_logger)
+        # Read back and validate
+        spreads_df = read_csv_to_df(spreads_output)
+        derivatives_df = read_csv_to_df(derivatives_output)
         
-        # Export data to CSV
-        data_pipeline_logger.info("Exporting data to CSV")
-        spreads_file = export_table_to_csv(spreads_data, "spreads_data_data", output_dir)
-        derivatives_file = export_table_to_csv(derivatives_data, "derivatives_data_data", output_dir)
+        print("\nSpreads Data after reading from CSV:")
+        print("----------------------------------")
+        spreads_df.info()
         
-        data_pipeline_logger.info(f"Data exported successfully to:\n- {spreads_file}\n- {derivatives_file}")
+        print("\nDerivatives Data after reading from CSV:")
+        print("----------------------------------")
+        derivatives_df.info()
         
-        # Verify exported data
-        validation_logger.info("Verifying exported data")
-        for file_path in [spreads_file, derivatives_file]:
-            try:
-                loaded_df = pd.read_csv(file_path)
-                validation_logger.info(f"Successfully loaded: {Path(file_path).name}")
-                validation_logger.info(f"Shape verification: {loaded_df.shape}")
-                validation_logger.info(f"Columns: {loaded_df.columns.tolist()}")
-                validation_logger.info(f"Data Types:\n{loaded_df.dtypes}")
-            except Exception as e:
-                validation_logger.error(f"Error verifying {Path(file_path).name}: {str(e)}")
+        # Handle missing values in derivatives data
+        derivatives_df_clean = handle_missing_values(derivatives_df, method='interpolate')
         
-        data_pipeline_logger.info("Data pipeline completed successfully")
+        # Validate the data
+        spreads_insights = validate_dataframe(
+            spreads_df, 
+            "Spreads Data",
+            expected_cols=['cad_ig_oas', 'us_ig_oas'],
+            value_ranges={'cad_ig_oas': (50, 500), 'us_ig_oas': (50, 500)}
+        )
+        print("\n".join(spreads_insights))
+        
+        derivatives_insights = validate_dataframe(
+            derivatives_df_clean,
+            "Derivatives Data",
+            expected_cols=['cdx_ig', 'cdx_hy'],
+            value_ranges={'cdx_ig': (30, 200), 'cdx_hy': (250, 1000)}
+        )
+        print("\n".join(derivatives_insights))
+        
+        # Plot the data
+        plot_historical_data(spreads_df, 'spreads', plots_dir, data_pipeline_logger)
+        plot_historical_data(derivatives_df_clean, 'derivatives', plots_dir, data_pipeline_logger)
+        data_pipeline_logger.info("Charts generated successfully")
         
     except Exception as e:
-        data_pipeline_logger.error(f"Error in data pipeline: {str(e)}", exc_info=True)
+        data_pipeline_logger.error(f"Error in main pipeline: {str(e)}", exc_info=True)
         raise
 
 if __name__ == "__main__":
