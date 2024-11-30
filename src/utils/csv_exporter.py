@@ -62,20 +62,81 @@ def export_table_to_csv(df: pd.DataFrame, output_path: Path) -> None:
         # Export to CSV with index and index label
         df.to_csv(f, index=True, index_label='Date')
 
-def read_csv_to_df(file_path: Path) -> pd.DataFrame:
+def read_csv_to_df(file_path, fill=None, start_date_align="no"):
     """
-    Read a CSV file into a DataFrame and set the index as DatetimeIndex.
+    Read CSV file into a DataFrame with date index and optional filling/alignment.
     
     Args:
-        file_path (Path): Path to the CSV file
-    
+        file_path (str): Path to CSV file
+        fill (str, optional): Fill method for NaN values. Options: None, 'ffill', 'bfill', 'interpolate'
+        start_date_align (str, optional): Whether to align start dates. Options: 'yes', 'no'
+        
     Returns:
-        pd.DataFrame: DataFrame with DatetimeIndex
+        pd.DataFrame: DataFrame with date index
     """
     # Read CSV with first column as index
     df = pd.read_csv(file_path, index_col=0)
+    
     # Convert index to datetime
     df.index = pd.to_datetime(df.index)
+    
+    # Ensure all columns are numeric
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Find first valid date for each column
+    first_valid_dates = {}
+    for col in df.columns:
+        first_valid_idx = df[col].first_valid_index()
+        if first_valid_idx is not None:
+            first_valid_dates[col] = first_valid_idx
+    
+    # Align start dates if requested
+    if start_date_align == "yes" and first_valid_dates:
+        # Find the latest first valid date among all columns
+        latest_start = max(first_valid_dates.values())
+        
+        # Check if any column has no data starting from latest_start
+        has_all_data = True
+        for col in df.columns:
+            first_valid = df.loc[latest_start:, col].first_valid_index()
+            if first_valid is None:
+                has_all_data = False
+                break
+        
+        if not has_all_data:
+            # Find next date where all columns have data
+            for idx in df.loc[latest_start:].index:
+                if all(df.loc[idx, col] == df.loc[idx, col] for col in df.columns):  # Check for no NaN
+                    latest_start = idx
+                    break
+        
+        # Only keep rows from the latest start date onwards
+        df = df[df.index >= latest_start].copy()
+    
+    # Apply fill method if specified
+    if fill is not None:
+        if fill == 'ffill':
+            # Forward fill but only after first valid value for each column
+            for col in df.columns:
+                if col in first_valid_dates:
+                    mask = df.index >= first_valid_dates[col]
+                    df.loc[mask, col] = df.loc[mask, col].ffill()
+        
+        elif fill == 'bfill':
+            # Backward fill but only after first valid value for each column
+            for col in df.columns:
+                if col in first_valid_dates:
+                    mask = df.index >= first_valid_dates[col]
+                    df.loc[mask, col] = df.loc[mask, col].bfill()
+        
+        elif fill == 'interpolate':
+            # Interpolate but only after first valid value for each column
+            for col in df.columns:
+                if col in first_valid_dates:
+                    mask = df.index >= first_valid_dates[col]
+                    df.loc[mask, col] = df.loc[mask, col].interpolate(method='linear')
+    
     return df
 
 def export_table_to_csv_original(df: pd.DataFrame, name: str, output_dir: str) -> str:
