@@ -183,67 +183,42 @@ def plot_historical_data(df, name, output_dir, data_pipeline_logger):
         data_pipeline_logger.error(f"Error creating historical chart for {name}: {str(e)}")
         raise
 
-def fetch_bloomberg_data(config: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Fetch data from Bloomberg based on config and ensure it has a DatetimeIndex.
+def fetch_bloomberg_data(start_date: str = '2020-01-02') -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Fetch data from Bloomberg."""
+    from xbbg import blp
     
-    Args:
-        config (dict): Configuration dictionary with Bloomberg settings
-        
-    Returns:
-        Tuple[pd.DataFrame, pd.DataFrame]: Spreads data and derivatives data with DatetimeIndex
-    """
-    # Get date range
-    start_date = config['settings']['default_start_date']
-    end_date = config['settings']['default_end_date'] or datetime.now().strftime('%Y-%m-%d')
+    # Force cache refresh by adding a timestamp parameter
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     
     # Fetch spreads data
-    spreads_tickers = [sec['ticker'] for sec in config['sprds']['securities']]
-    spreads_data = blp.bdh(
-        tickers=spreads_tickers,
-        flds=[config['sprds']['field']],
-        start_date=start_date,
-        end_date=end_date
-    )
-    
-    # Remove the field name from multi-index columns and keep only the ticker
-    spreads_data.columns = spreads_data.columns.get_level_values(0)
-    
-    # Rename columns to custom names
-    spreads_mapping = {
-        sec['ticker']: sec['custom_name']
-        for sec in config['sprds']['securities']
+    spreads_tickers = {
+        'I05510CA Index': 'cad_ig_oas',  # CAD Investment Grade OAS
+        'LUACTRUU Index': 'us_ig_oas'    # US Investment Grade OAS
     }
-    spreads_data = spreads_data.rename(columns=spreads_mapping)
     
-    # Ensure DatetimeIndex
-    if not isinstance(spreads_data.index, pd.DatetimeIndex):
-        spreads_data.index = pd.to_datetime(spreads_data.index)
+    spreads_df = pd.DataFrame()
+    for ticker, col_name in spreads_tickers.items():
+        data = blp.bdh(ticker, 'INDEX_OAS_TSY_BP', start_date, datetime.now().strftime('%Y-%m-%d'),
+                      cache=False)  # Disable caching
+        if not data.empty:
+            # Access the data using multi-index column structure
+            spreads_df[col_name] = data[(ticker, 'INDEX_OAS_TSY_BP')]
     
     # Fetch derivatives data
-    derv_tickers = [sec['ticker'] for sec in config['derv']['securities']]
-    derivatives_data = blp.bdh(
-        tickers=derv_tickers,
-        flds=[config['derv']['field']],
-        start_date=start_date,
-        end_date=end_date
-    )
-    
-    # Remove the field name from multi-index columns and keep only the ticker
-    derivatives_data.columns = derivatives_data.columns.get_level_values(0)
-    
-    # Rename columns to custom names
-    derv_mapping = {
-        sec['ticker']: sec['custom_name']
-        for sec in config['derv']['securities']
+    derivatives_tickers = {
+        'IBOXUMAE MKIT Curncy': 'cdx_ig',  # CDX IG
+        'IBOXHYSE MKIT Curncy': 'cdx_hy'   # CDX HY
     }
-    derivatives_data = derivatives_data.rename(columns=derv_mapping)
     
-    # Ensure DatetimeIndex
-    if not isinstance(derivatives_data.index, pd.DatetimeIndex):
-        derivatives_data.index = pd.to_datetime(derivatives_data.index)
+    derivatives_df = pd.DataFrame()
+    for ticker, col_name in derivatives_tickers.items():
+        data = blp.bdh(ticker, 'ROLL_ADJUSTED_MID_PRICE', start_date, datetime.now().strftime('%Y-%m-%d'),
+                      cache=False)  # Disable caching
+        if not data.empty:
+            # Access the data using multi-index column structure
+            derivatives_df[col_name] = data[(ticker, 'ROLL_ADJUSTED_MID_PRICE')]
     
-    return spreads_data, derivatives_data
+    return spreads_df, derivatives_df
 
 def read_csv_to_df(file_path: Path, date_column: str = 'Date') -> pd.DataFrame:
     """
@@ -283,7 +258,7 @@ def main():
         plots_dir.mkdir(parents=True, exist_ok=True)
         
         # Fetch data from Bloomberg
-        spreads_data, derivatives_data = fetch_bloomberg_data(config)
+        spreads_data, derivatives_data = fetch_bloomberg_data()
         data_pipeline_logger.info("Bloomberg data fetched successfully")
         
         print("\nSpreads Data after Bloomberg fetch:")

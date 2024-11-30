@@ -57,8 +57,10 @@ def export_table_to_csv(df: pd.DataFrame, output_path: Path) -> None:
     # Create directory if it doesn't exist
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Export to CSV with index and index label
-    df.to_csv(output_path, index=True, index_label='Date')
+    # Force overwrite by opening in write mode
+    with open(output_path, 'w', newline='') as f:
+        # Export to CSV with index and index label
+        df.to_csv(f, index=True, index_label='Date')
 
 def read_csv_to_df(file_path: Path) -> pd.DataFrame:
     """
@@ -70,7 +72,7 @@ def read_csv_to_df(file_path: Path) -> pd.DataFrame:
     Returns:
         pd.DataFrame: DataFrame with DatetimeIndex
     """
-    # Read CSV with Date column as index
+    # Read CSV with Date column as index and parse dates
     df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
     return df
 
