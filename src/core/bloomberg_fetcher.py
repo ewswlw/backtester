@@ -136,6 +136,54 @@ class BloombergDataFetcher:
             self.logger.error(f"Error processing data: {str(e)}")
             raise
             
+    def print_data_validation(self, data: pd.DataFrame, title: str):
+        """Print comprehensive data validation information."""
+        print(f"\n{'='*50}")
+        print(f"Data Validation for: {title}")
+        print(f"{'='*50}\n")
+
+        # Print DataFrame info
+        print(f"{title} Data Info:")
+        print("----------------------------------")
+        print(data.info())
+        print()
+
+        # Print date range and missing dates
+        print("Date Range:", data.index.min(), "to", data.index.max())
+        business_days = pd.date_range(start=data.index.min(), end=data.index.max(), freq='B')
+        missing_days = business_days.difference(data.index)
+        if len(missing_days) > 0:
+            print(f"WARNING: Found {len(missing_days)} missing business days")
+            print("First few missing dates:", missing_days[:5].tolist())
+        print()
+
+        # Print column data types
+        print("Column Data Types:")
+        for col, dtype in data.dtypes.items():
+            print(f"  {col}: {dtype}")
+        print()
+
+        # Print value range validation
+        print("Value Range Validation:\n")
+        print("Basic Statistics:\n")
+        for column in data.columns:
+            stats = data[column].describe()
+            print(f"{column}:")
+            print(f"  Mean: {stats['mean']:.2f}")
+            print(f"  Std: {stats['std']:.2f}")
+            print(f"  Min: {stats['min']:.2f}")
+            print(f"  Max: {stats['max']:.2f}")
+            print()
+
+        # Print first and last rows
+        print("\nFirst 5 rows:")
+        print("----------------------------------")
+        print(data.head())
+        print("\nLast 5 rows:")
+        print("----------------------------------")
+        print(data.tail())
+        print()
+
     def run_pipeline(self) -> pd.DataFrame:
         """Run the complete data fetching and processing pipeline."""
         self.logger.info("Starting data pipeline")
@@ -145,6 +193,16 @@ class BloombergDataFetcher:
         
         data = self.fetch_data()
         self.logger.info("Data fetched successfully")
+        
+        # Print validation for raw Bloomberg data
+        if self.config:
+            for data_type in self.config:
+                if data_type in ['sprds', 'derv']:
+                    cols = [sec['custom_name'] for sec in self.config[data_type]['securities']]
+                    if all(col in data.columns for col in cols):
+                        self.print_data_validation(data[cols], f"{data_type.title()} Data")
+        else:
+            self.print_data_validation(data, "Bloomberg Data")
         
         processed_data = self.process_data(data)
         self.logger.info("Data processed successfully")

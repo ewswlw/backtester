@@ -64,7 +64,7 @@ def export_table_to_csv(df: pd.DataFrame, output_path: Path) -> None:
 
 def read_csv_to_df(file_path: Path) -> pd.DataFrame:
     """
-    Read a CSV file into a DataFrame and set the Date column as DatetimeIndex.
+    Read a CSV file into a DataFrame and set the index as DatetimeIndex.
     
     Args:
         file_path (Path): Path to the CSV file
@@ -72,8 +72,10 @@ def read_csv_to_df(file_path: Path) -> pd.DataFrame:
     Returns:
         pd.DataFrame: DataFrame with DatetimeIndex
     """
-    # Read CSV with Date column as index and parse dates
-    df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+    # Read CSV with first column as index
+    df = pd.read_csv(file_path, index_col=0)
+    # Convert index to datetime
+    df.index = pd.to_datetime(df.index)
     return df
 
 def export_table_to_csv_original(df: pd.DataFrame, name: str, output_dir: str) -> str:
