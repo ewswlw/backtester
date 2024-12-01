@@ -84,6 +84,13 @@ def read_csv_to_df(file_path, fill=None, start_date_align="no"):
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     
+    # Special handling for Nov 15, 2005
+    problem_date = pd.Timestamp('2005-11-15')
+    if problem_date in df.index:
+        # Forward fill values from the previous day for all columns
+        prev_date = df.index[df.index.get_loc(problem_date) - 1]
+        df.loc[problem_date] = df.loc[prev_date]
+    
     # Find first valid date for each column
     first_valid_dates = {}
     for col in df.columns:

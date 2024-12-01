@@ -171,6 +171,7 @@ def fetch_bloomberg_data() -> Dict[str, pd.DataFrame]:
                 if not data.empty:
                     # Access the data using multi-index column structure
                     series = data[(security['ticker'], section['field'])]
+                    
                     # Replace 0s with NaN before first valid data point
                     first_valid_idx = series.first_valid_index()
                     if first_valid_idx is not None:
@@ -179,6 +180,14 @@ def fetch_bloomberg_data() -> Dict[str, pd.DataFrame]:
                         # Forward fill after first valid point, replacing 0s
                         mask = series.index >= first_valid_idx
                         series.loc[mask] = series.loc[mask].replace(0, np.nan).ffill()
+                    
+                    # Special handling for Nov 15, 2005
+                    problem_date = pd.Timestamp('2005-11-15')
+                    if problem_date in series.index:
+                        # Get the previous day's value
+                        prev_date = series.index[series.index.get_loc(problem_date) - 1]
+                        series.loc[problem_date] = series.loc[prev_date]
+                    
                     df[security['custom_name']] = series
             
             section_dfs[section_name] = df
