@@ -108,11 +108,18 @@ def print_dataframe_validation(df: pd.DataFrame, name: str) -> None:
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]):
             stats = df[col].describe()
+            last_value = df[col].iloc[-1]
+            # Calculate percentile rank of last value
+            percentile_rank = stats['count'] * (df[col] <= last_value).mean()
+            percentile = (percentile_rank / stats['count']) * 100
+            
             print(f"{col}:")
             print(f"  Mean: {stats['mean']:.2f}")
             print(f"  Std: {stats['std']:.2f}")
             print(f"  Min: {stats['min']:.2f}")
             print(f"  Max: {stats['max']:.2f}")
+            print(f"  Last Value: {last_value:.2f}")
+            print(f"  Percentile Rank: {percentile:.1f}%")
             print()
     
     # First and last rows
@@ -180,6 +187,16 @@ def fetch_bloomberg_data() -> Dict[str, pd.DataFrame]:
                         # Forward fill after first valid point, replacing 0s
                         mask = series.index >= first_valid_idx
                         series.loc[mask] = series.loc[mask].replace(0, np.nan).ffill()
+                    
+                    # For Sprds data, handle negative values by replacing with previous valid value
+                    if section_name == 'sprds':
+                        # Create a mask for negative values
+                        negative_mask = series < 0
+                        if negative_mask.any():
+                            # Replace negative values with NaN
+                            series[negative_mask] = np.nan
+                            # Forward fill to replace NaNs with previous valid values
+                            series = series.ffill()
                     
                     # Special handling for Nov 15, 2005
                     problem_date = pd.Timestamp('2005-11-15')
