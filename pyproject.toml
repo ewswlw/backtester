@@ -34,6 +34,7 @@ jupyter = "^1.1.1"
 pdblp = "^0.1.8"
 matplotlib = "^3.9.2"
 seaborn = "^0.13.2"
+scikit-learn = "^1.5.2"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
