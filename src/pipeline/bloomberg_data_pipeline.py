@@ -205,6 +205,7 @@ def fetch_bloomberg_data() -> Dict[str, pd.DataFrame]:
                         prev_date = series.index[series.index.get_loc(problem_date) - 1]
                         series.loc[problem_date] = series.loc[prev_date]
                     
+                    # Use the custom_name from the config for the column name
                     df[security['custom_name']] = series
             
             section_dfs[section_name] = df
