@@ -8,36 +8,42 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-def merge_dfs(dfs: Union[List[pd.DataFrame], Dict[str, pd.DataFrame]], 
+def merge_dfs(*dfs_args: Union[pd.DataFrame, pd.Series], 
               fill: str = None, 
               start_date_align: str = "no") -> pd.DataFrame:
     """
-    Merge multiple DataFrames with options for handling missing values and date alignment.
+    Merge multiple DataFrames or Series with options for handling missing values and date alignment.
     
     Args:
-        dfs (Union[List[pd.DataFrame], Dict[str, pd.DataFrame]]): List of DataFrames or Dict of name:DataFrame pairs
+        *dfs_args: Variable number of DataFrames/Series to merge
         fill (str, optional): Fill method for NaN values. Options: None, 'ffill', 'bfill', 'interpolate'
         start_date_align (str, optional): Whether to align start dates. Options: 'yes', 'no'
         
     Returns:
         pd.DataFrame: Merged DataFrame with date index
     """
-    # Convert list of DataFrames to dictionary if necessary
-    if isinstance(dfs, list):
-        dfs = {f'df_{i}': df for i, df in enumerate(dfs)}
+    # Convert arguments to dictionary
+    dfs = {f'df_{i}': df for i, df in enumerate(dfs_args)}
     
-    # Ensure all DataFrames have datetime index
+    # Convert Series to DataFrame and ensure datetime index
+    processed_dfs = {}
     for name, df in dfs.items():
+        # Convert Series to DataFrame if necessary
+        if isinstance(df, pd.Series):
+            df = df.to_frame()
+        
+        # Ensure datetime index
         if not isinstance(df.index, pd.DatetimeIndex):
             try:
-                dfs[name].index = pd.to_datetime(df.index)
+                df.index = pd.to_datetime(df.index)
             except Exception as e:
-                logger.error(f"Failed to convert index to datetime for {name}: {str(e)}")
-                raise
+                raise ValueError(f"Failed to convert index to datetime for {name}: {str(e)}")
+        
+        processed_dfs[name] = df
     
     # Find first valid date for each DataFrame
     first_valid_dates = {}
-    for name, df in dfs.items():
+    for name, df in processed_dfs.items():
         for col in df.columns:
             first_valid_idx = df[col].first_valid_index()
             if first_valid_idx is not None:
@@ -47,17 +53,20 @@ def merge_dfs(dfs: Union[List[pd.DataFrame], Dict[str, pd.DataFrame]],
                     first_valid_dates[name] = max(first_valid_dates[name], first_valid_idx)
     
     # Align start dates if requested
+    start_date_align = str(start_date_align).lower()
     if start_date_align == "yes" and first_valid_dates:
         # Find the latest start date among all DataFrames
         latest_start = max(first_valid_dates.values())
         
         # Trim all DataFrames to start from this date
-        for name in dfs:
-            dfs[name] = dfs[name][dfs[name].index >= latest_start].copy()
+        for name in processed_dfs:
+            df = processed_dfs[name]
+            mask = df.index >= latest_start
+            processed_dfs[name] = df.loc[mask].copy()
     
     # Merge all DataFrames
     merged_df = None
-    for name, df in dfs.items():
+    for name, df in processed_dfs.items():
         if merged_df is None:
             merged_df = df.copy()
         else:
@@ -67,7 +76,6 @@ def merge_dfs(dfs: Union[List[pd.DataFrame], Dict[str, pd.DataFrame]],
                                how='outer')
     
     if merged_df is None:
-        logger.warning("No DataFrames to merge")
         return pd.DataFrame()
     
     # Apply fill method if specified
