@@ -105,25 +105,60 @@ def calculate_sharpe_ratio(price_series: pd.Series, benchmark_rate: float = 0) -
     Returns:
         float: Sharpe ratio
     """
-    cagr = calculate_cagr(price_series)
-    return_series = calculate_return_series(price_series)
-    volatility = calculate_annualized_volatility(return_series)
-    return (cagr - benchmark_rate) / volatility
+    # Calculate returns and remove NA values
+    returns = calculate_return_series(price_series).dropna()
+    
+    # Convert annual benchmark rate to match return frequency
+    n_periods = len(returns)
+    years_past = get_years_past(returns)
+    periods_per_year = n_periods / years_past
+    period_benchmark_rate = (1 + benchmark_rate) ** (1 / periods_per_year) - 1
+    
+    # Calculate excess returns
+    excess_returns = returns - period_benchmark_rate
+    
+    # Calculate annualized mean and std of excess returns
+    mean_excess_return = excess_returns.mean() * periods_per_year
+    volatility = calculate_annualized_volatility(returns)
+    
+    if volatility == 0:
+        return np.nan
+        
+    return mean_excess_return / volatility
 
-def calculate_rolling_sharpe_ratio(price_series: pd.Series, n: float = 20) -> pd.Series:
+def calculate_sortino_ratio(price_series: pd.Series, benchmark_rate: float = 0) -> float:
     """
-    Compute an approximation of the Sharpe ratio on a rolling basis.
-    Intended for use as a preference value.
+    Calculates the Sortino ratio.
     
     Args:
         price_series (pd.Series): Price series with datetime index
-        n (float): Rolling window size, defaults to 20
+        benchmark_rate (float): Risk-free rate, defaults to 0
         
     Returns:
-        pd.Series: Rolling Sharpe ratio
+        float: Sortino ratio
     """
-    rolling_return_series = calculate_return_series(price_series).rolling(n)
-    return rolling_return_series.mean() / rolling_return_series.std()
+    # Calculate returns and remove NA values
+    returns = calculate_return_series(price_series).dropna()
+    
+    # Convert annual benchmark rate to match return frequency
+    n_periods = len(returns)
+    years_past = get_years_past(returns)
+    periods_per_year = n_periods / years_past
+    period_benchmark_rate = (1 + benchmark_rate) ** (1 / periods_per_year) - 1
+    
+    # Calculate excess returns
+    excess_returns = returns - period_benchmark_rate
+    
+    # Calculate annualized mean excess return
+    mean_excess_return = excess_returns.mean() * periods_per_year
+    
+    # Calculate downside deviation
+    downside_deviation = calculate_annualized_downside_deviation(returns, benchmark_rate)
+    
+    if downside_deviation == 0:
+        return np.nan
+        
+    return mean_excess_return / downside_deviation
 
 def calculate_annualized_downside_deviation(return_series: pd.Series, benchmark_rate: float = 0) -> float:
     """
@@ -144,22 +179,6 @@ def calculate_annualized_downside_deviation(return_series: pd.Series, benchmark_
     denominator = return_series.shape[0] - 1
     downside_deviation = np.sqrt(downside_sum_of_squares / denominator)
     return downside_deviation * np.sqrt(entries_per_year)
-
-def calculate_sortino_ratio(price_series: pd.Series, benchmark_rate: float = 0) -> float:
-    """
-    Calculates the Sortino ratio.
-    
-    Args:
-        price_series (pd.Series): Price series with datetime index
-        benchmark_rate (float): Risk-free rate, defaults to 0
-        
-    Returns:
-        float: Sortino ratio
-    """
-    cagr = calculate_cagr(price_series)
-    return_series = calculate_return_series(price_series)
-    downside_deviation = calculate_annualized_downside_deviation(return_series)
-    return (cagr - benchmark_rate) / downside_deviation
 
 def calculate_pure_profit_score(price_series: pd.Series) -> float:
     """
@@ -228,10 +247,20 @@ def calculate_drawdown_series(series: pd.Series, method: str = 'log') -> pd.Seri
     Returns:
         pd.Series: Drawdown series
     """
-    assert method in DRAWDOWN_EVALUATORS, \
-        f'Method "{method}" must by one of {list(DRAWDOWN_EVALUATORS.keys())}'
+    if method not in DRAWDOWN_EVALUATORS:
+        raise ValueError(f"Method must be one of {list(DRAWDOWN_EVALUATORS.keys())}")
+    
     evaluator = DRAWDOWN_EVALUATORS[method]
-    return evaluator(series, series.cummax())
+    drawdown_values = []
+    running_peak = series.iloc[0]
+    
+    for price in series.values:
+        if price > running_peak:
+            running_peak = price
+        drawdown = evaluator(price, running_peak)
+        drawdown_values.append(drawdown)
+    
+    return pd.Series(drawdown_values, index=series.index)
 
 def calculate_max_drawdown(series: pd.Series, method: str = 'log') -> float:
     """
@@ -262,34 +291,44 @@ def calculate_max_drawdown_with_metadata(series: pd.Series, method: str = 'log')
             - trough_date: pd.Timestamp
             - trough_price: float
     """
-    assert method in DRAWDOWN_EVALUATORS, \
-        f'Method "{method}" must by one of {list(DRAWDOWN_EVALUATORS.keys())}'
-
+    if method not in DRAWDOWN_EVALUATORS:
+        raise ValueError(f"Method must be one of {list(DRAWDOWN_EVALUATORS.keys())}")
+    
     evaluator = DRAWDOWN_EVALUATORS[method]
     max_drawdown = 0
-    local_peak_date = peak_date = trough_date = series.index[0]
-    local_peak_price = peak_price = trough_price = series.iloc[0]
-
-    for date, price in series.iteritems():
-        if price > local_peak_price:
-            local_peak_date = date
-            local_peak_price = price
-
-        drawdown = evaluator(price, local_peak_price)
-
+    peak_date = series.index[0]
+    trough_date = series.index[0]
+    recovery_date = None
+    local_peak = series.iloc[0]
+    peak_price = series.iloc[0]
+    trough_price = series.iloc[0]
+    
+    for date, price in zip(series.index, series.values):
+        if price > local_peak:
+            local_peak = price
+            if max_drawdown == 0:
+                peak_date = date
+                peak_price = price
+        
+        drawdown = evaluator(price, local_peak)
+        
         if drawdown > max_drawdown:
             max_drawdown = drawdown
-            peak_date = local_peak_date
-            peak_price = local_peak_price
+            peak_date = date
+            peak_price = local_peak
             trough_date = date
             trough_price = price
-
+            recovery_date = None
+        elif max_drawdown > 0 and price >= peak_price and recovery_date is None:
+            recovery_date = date
+    
     return {
         'max_drawdown': max_drawdown,
         'peak_date': peak_date,
         'peak_price': peak_price,
         'trough_date': trough_date,
-        'trough_price': trough_price
+        'trough_price': trough_price,
+        'recovery_date': recovery_date
     }
 
 def calculate_log_max_drawdown_ratio(series: pd.Series) -> float:
@@ -323,3 +362,18 @@ def calculate_calmar_ratio(series: pd.Series, years_past: int = 3) -> float:
     percent_drawdown = calculate_max_drawdown(series, method='percent')
     cagr = calculate_cagr(series)
     return cagr / percent_drawdown
+
+def calculate_rolling_sharpe_ratio(price_series: pd.Series, n: float = 20) -> pd.Series:
+    """
+    Compute an approximation of the Sharpe ratio on a rolling basis.
+    Intended for use as a preference value.
+    
+    Args:
+        price_series (pd.Series): Price series with datetime index
+        n (float): Rolling window size, defaults to 20
+        
+    Returns:
+        pd.Series: Rolling Sharpe ratio
+    """
+    rolling_return_series = calculate_return_series(price_series).rolling(n)
+    return rolling_return_series.mean() / rolling_return_series.std()

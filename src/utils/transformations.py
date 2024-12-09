@@ -127,15 +127,6 @@ def get_er_index(df: pd.DataFrame, cost_of_borrow: float = 40, leverage: float =
     # Convert cost_of_borrow from basis points to a decimal (e.g., 40 bps = 0.004)
     cost_of_borrow_decimal = cost_of_borrow / 10000
     
-    # Frequency conversion factors
-    frequency_factors = {
-        'D': 365,     # Daily
-        'M': 12,      # Monthly
-        'Q': 4,       # Quarterly
-        'A': 1,       # Annual
-        'ME': 12      # Month-End, treated as monthly
-    }
-    
     # Infer the frequency of the DataFrame
     inferred_freq = pd.infer_freq(df.index)
     
@@ -149,33 +140,32 @@ def get_er_index(df: pd.DataFrame, cost_of_borrow: float = 40, leverage: float =
     
     logging.info(f"Inferred frequency: {inferred_freq}")
     
-    # Map the inferred frequency to the relevant period per year
-    frequency_key = inferred_freq[:2]  # Use the first two characters to capture 'ME' and others
-    if frequency_key not in frequency_factors:
-        raise ValueError(f"Inferred frequency '{frequency_key}' not supported. Supported frequencies: 'D', 'M', 'Q', 'A', 'ME'.")
+    # Calculate daily cost of borrowing
+    daily_cost = cost_of_borrow_decimal / 365
     
-    periods_per_year = frequency_factors[frequency_key]
+    # Calculate returns for each column
+    result_df = pd.DataFrame(index=df.index)
     
-    # Calculate the periodic cost of borrowing in decimal form
-    periodic_cost = cost_of_borrow_decimal / periods_per_year
+    # Create leverage suffix using the actual leverage value
+    leverage_suffix = f"_{leverage:.1f}x"
     
-    # Calculate the periodic return of the index
-    periodic_return = df.pct_change().fillna(0)
+    for column in df.columns:
+        # Calculate daily returns
+        daily_returns = df[column].pct_change().fillna(0)
+        
+        # Apply leverage and subtract borrowing cost
+        leveraged_returns = (daily_returns * leverage) - (daily_cost * leverage)
+        
+        # Calculate cumulative index
+        cumulative_index = (1 + leveraged_returns).cumprod()
+        
+        # Normalize to start at 100
+        normalized_index = 100 * cumulative_index / cumulative_index.iloc[0]
+        
+        # Add to result DataFrame with original column name plus leverage suffix
+        result_df[f"{column}{leverage_suffix}"] = normalized_index
     
-    # Calculate the excess returns using the formula:
-    # Excess Return = (Periodic Return of the Index - Periodic Cost of Borrow) * Leverage
-    excess_returns = (periodic_return - periodic_cost) * leverage
-    
-    # Compute the excess return index
-    er_index = (1 + excess_returns).cumprod()
-    
-    # Normalize to start at 100
-    er_index = 100 * er_index / er_index.iloc[0]
-    
-    # Rename the column to indicate it is an index
-    er_index.columns = [col_name + '_index' for col in df.columns]
-    
-    return er_index
+    return result_df
 
 def convert_er_ytd_to_index(df: pd.DataFrame) -> pd.DataFrame:
     """
