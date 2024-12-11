@@ -35,6 +35,9 @@ pdblp = "^0.1.8"
 matplotlib = "^3.9.2"
 seaborn = "^0.13.2"
 scikit-learn = "^1.5.2"
+dash-bootstrap-components = "^1.6.0"
+requests = "^2.32.3"
+ipywidgets = "^8.1.5"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
