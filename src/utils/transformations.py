@@ -3,6 +3,10 @@ from typing import List, Optional, Union
 import logging
 from xbbg import blp
 import os
+import numpy as np
+from pandas.tseries.frequencies import to_offset
+import warnings
+from typing import Tuple
 
 # Set up logging only if not already configured
 if not logging.getLogger().handlers:
@@ -233,43 +237,132 @@ def convert_er_ytd_to_index(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
-def get_ohlc(data, frequency):
-  """
-  Resample the input time series data to the specified frequency and return OHLC values.
+def get_ohlc(data: Union[pd.Series, pd.DataFrame], frequency: str) -> pd.DataFrame:
+    """
+    Resample the input time series data to the specified frequency and return OHLC values.
 
-  Parameters:
-  - data: pd.Series or pd.DataFrame
-      The input time series data. If a DataFrame, it should have a DateTime index and a single column.
-  - frequency: str
-      The resampling frequency ('d', 'w', 'm', 'q', 'y').
+    Parameters:
+    -----------
+    data : pd.Series or pd.DataFrame
+        The input time series data. If a DataFrame, it should have a DateTime index and a single column.
+    frequency : str
+        The resampling frequency ('d', 'w', 'm', 'q', 'y').
 
-  Returns:
-  - pd.DataFrame
-      A DataFrame with columns ['Open', 'High', 'Low', 'Close'].
-  """
-  # Ensure the input is a DataFrame
-  if isinstance(data, pd.Series):
-      data = data.to_frame(name='value')
-  elif isinstance(data, pd.DataFrame):
-      if data.shape[1] != 1:
-          raise ValueError("DataFrame must have exactly one column.")
-  else:
-      raise TypeError("Input must be a Pandas Series or DataFrame.")
+    Returns:
+    --------
+    pd.DataFrame
+        A DataFrame with columns ['Open', 'High', 'Low', 'Close'].
+    """
+    # Ensure the input is a DataFrame
+    if isinstance(data, pd.Series):
+        data = data.to_frame(name='value')
+    elif isinstance(data, pd.DataFrame):
+        if data.shape[1] != 1:
+            raise ValueError("DataFrame must have exactly one column.")
+    else:
+        raise TypeError("Input must be a Pandas Series or DataFrame.")
 
-  # Define the resampling rule
-  resample_rule = {
-      'd': 'D',
-      'w': 'W',
-      'm': 'M',
-      'q': 'Q',
-      'y': 'Y'
-  }.get(frequency.lower())
+    # Define the resampling rule
+    resample_rule = {
+        'd': 'D',
+        'w': 'W',
+        'm': 'M',
+        'q': 'Q',
+        'y': 'Y'
+    }.get(frequency.lower())
 
-  if not resample_rule:
-      raise ValueError("Frequency must be one of 'd', 'w', 'm', 'q', 'y'.")
+    if not resample_rule:
+        raise ValueError("Frequency must be one of 'd', 'w', 'm', 'q', 'y'.")
 
-  # Resample and calculate OHLC
-  ohlc = data.resample(resample_rule).agg(['first', 'max', 'min', 'last'])
-  ohlc.columns = ['Open', 'High', 'Low', 'Close']
+    # Resample and calculate OHLC
+    ohlc = data.resample(resample_rule).agg(['first', 'max', 'min', 'last'])
+    ohlc.columns = ['Open', 'High', 'Low', 'Close']
 
-  return ohlc
+    return ohlc
+
+def rollchg(data: Union[pd.DataFrame, pd.Series], 
+            period: str = '1y', 
+            change_type: str = 'pct', 
+            lag_lead: int = 0) -> pd.DataFrame:
+    """
+    Calculate rolling changes for time series data.
+
+    Parameters:
+    -----------
+    data : pd.DataFrame or pd.Series
+        Input time series data with datetime index
+    period : str, default '1y'
+        Period to calculate change over. Format: number + period identifier
+        Period identifiers:
+        - 'd' for days (e.g., '5d' for 5 days)
+        - 'm' for months (e.g., '3m' for 3 months)
+        - 'q' for quarters (e.g., '2q' for 2 quarters)
+        - 'y' for years (e.g., '1y' for 1 year)
+    change_type : str, default 'pct'
+        Type of change to calculate: 'pct' for percentage or 'net' for absolute
+    lag_lead : int, default 0
+        Number of periods to shift the series by:
+        - Negative values lag the series (look back)
+        - Positive values lead the series (look forward)
+        - Zero means no shift
+
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame with calculated changes and DatetimeIndex
+    """
+    # Input validation
+    if not isinstance(data, (pd.DataFrame, pd.Series)):
+        raise TypeError("Input must be a pandas DataFrame or Series")
+
+    # Ensure we have a DataFrame with datetime index
+    if isinstance(data, pd.Series):
+        df = data.to_frame()
+    else:
+        df = data.copy()
+
+    # Convert index to datetime if it's not already
+    if not isinstance(df.index, pd.DatetimeIndex):
+        try:
+            df.index = pd.to_datetime(df.index)
+        except Exception as e:
+            raise ValueError(f"Could not convert index to datetime: {str(e)}")
+
+    # Parse period string
+    if not isinstance(period, str):
+        period = str(period)
+    
+    # Extract number and period identifier
+    import re
+    match = re.match(r'(\d*\.?\d*)([dmqy])', period.lower())
+    if not match:
+        raise ValueError("Invalid period format. Use number + identifier (e.g., '1y', '3m', '90d', '2q')")
+    
+    num, unit = match.groups()
+    num = float(num) if num else 1.0
+
+    # Calculate the number of periods based on data frequency
+    avg_delta = (df.index[-1] - df.index[0]) / (len(df.index) - 1)
+    data_freq_days = avg_delta.days
+
+    # Convert period to number of observations
+    if unit == 'd':
+        n_periods = int(num / data_freq_days) if data_freq_days > 0 else int(num)
+    elif unit == 'm':
+        n_periods = int((num * 30) / data_freq_days) if data_freq_days > 0 else int(num * 21)
+    elif unit == 'q':
+        n_periods = int((num * 90) / data_freq_days) if data_freq_days > 0 else int(num * 63)
+    elif unit == 'y':
+        n_periods = int((num * 365) / data_freq_days) if data_freq_days > 0 else int(num * 252)
+
+    # Apply lag/lead if specified
+    if lag_lead != 0:
+        df = df.shift(-lag_lead)  # Negative shift for lag, positive for lead
+
+    # Calculate changes
+    if change_type.lower() == 'pct':
+        result = df.pct_change(periods=n_periods, fill_method=None)
+    else:  # net change
+        result = df - df.shift(n_periods)
+
+    return result.dropna()
