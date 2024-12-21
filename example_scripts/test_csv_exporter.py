@@ -270,7 +270,7 @@ def main():
         derivatives_data.info()
         
         # Export to CSV
-        spreads_output = data_dir / 'spreads_data.csv'
+        spreads_output = data_dir / 'sprds_data.csv'
         derivatives_output = data_dir / 'derivatives_data.csv'
         
         export_table_to_csv(spreads_data, spreads_output)

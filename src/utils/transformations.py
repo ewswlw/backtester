@@ -116,7 +116,6 @@ def get_credit_fund_estimated_index(df1: pd.DataFrame, df2: pd.DataFrame, col_na
   
   return estimated_index
 
-
 def get_er_index(df: pd.DataFrame, cost_of_borrow: float = 40, leverage: float = 1.0, col_name: str = "er_index") -> pd.DataFrame:
     """
     Computes an excess return index starting at 100 that represents the performance of an investment in the index,
@@ -144,8 +143,49 @@ def get_er_index(df: pd.DataFrame, cost_of_borrow: float = 40, leverage: float =
     
     logging.info(f"Inferred frequency: {inferred_freq}")
     
-    # Calculate daily cost of borrowing
-    daily_cost = cost_of_borrow_decimal / 365
+    # Define frequency factors for cost of borrowing calculation
+    frequency_factors = {
+        # Daily frequencies
+        'D': 365,    # Calendar days
+        'B': 252,    # Business days
+        
+        # Weekly frequencies
+        'W': 52,     # Weekly
+        'W-MON': 52, 'W-TUE': 52, 'W-WED': 52, 'W-THU': 52, 'W-FRI': 52,
+        
+        # Monthly frequencies
+        'M': 12,     # Month end
+        'MS': 12,    # Month start
+        'BM': 12,    # Business month end
+        'BMS': 12,   # Business month start
+        'ME': 12,    # Month end
+        
+        # Quarterly frequencies
+        'Q': 4,      # Quarter end
+        'QS': 4,     # Quarter start
+        'BQ': 4,     # Business quarter end
+        'BQS': 4,    # Business quarter start
+        
+        # Annual frequencies
+        'A': 1,      # Year end
+        'AS': 1,     # Year start
+        'BA': 1,     # Business year end
+        'BAS': 1     # Business year start
+    }
+    
+    # Extract base frequency (first character) if not found in mapping
+    if inferred_freq not in frequency_factors:
+        base_freq = inferred_freq[0]
+        if base_freq in ['D', 'W', 'M', 'Q', 'A']:
+            frequency_factor = frequency_factors.get(base_freq, 365)  # Default to daily if unknown
+        else:
+            logging.warning(f"Unknown frequency {inferred_freq}, defaulting to daily (365).")
+            frequency_factor = 365
+    else:
+        frequency_factor = frequency_factors[inferred_freq]
+    
+    # Calculate periodic cost of borrowing based on frequency
+    periodic_cost = cost_of_borrow_decimal / frequency_factor
     
     # Calculate returns for each column
     result_df = pd.DataFrame(index=df.index)
@@ -154,11 +194,11 @@ def get_er_index(df: pd.DataFrame, cost_of_borrow: float = 40, leverage: float =
     leverage_suffix = f"_{leverage:.1f}x"
     
     for column in df.columns:
-        # Calculate daily returns
-        daily_returns = df[column].pct_change().fillna(0)
+        # Calculate periodic returns based on the inferred frequency
+        periodic_returns = df[column].pct_change().fillna(0)
         
         # Apply leverage and subtract borrowing cost
-        leveraged_returns = (daily_returns * leverage) - (daily_cost * leverage)
+        leveraged_returns = (periodic_returns * leverage) - (periodic_cost * leverage)
         
         # Calculate cumulative index
         cumulative_index = (1 + leveraged_returns).cumprod()
