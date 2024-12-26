@@ -286,7 +286,12 @@ def get_ohlc(data: Union[pd.Series, pd.DataFrame], frequency: str) -> pd.DataFra
     data : pd.Series or pd.DataFrame
         The input time series data. If a DataFrame, it should have a DateTime index and a single column.
     frequency : str
-        The resampling frequency ('d', 'w', 'm', 'q', 'y').
+        The resampling frequency:
+        - 'd': Daily (copies values to OHLC)
+        - 'w' or 'W': Week ending Friday (uses 'W-FRI')
+        - 'm' or 'M': Month end (uses 'ME')
+        - 'q' or 'Q': Quarter end December (uses 'Q-DEC')
+        - 'y' or 'Y': Year end December (uses 'A-DEC')
 
     Returns:
     --------
@@ -302,19 +307,36 @@ def get_ohlc(data: Union[pd.Series, pd.DataFrame], frequency: str) -> pd.DataFra
     else:
         raise TypeError("Input must be a Pandas Series or DataFrame.")
 
-    # Define the resampling rule
-    resample_rule = {
-        'd': 'D',
-        'w': 'W',
-        'm': 'M',
-        'q': 'Q',
-        'y': 'Y'
-    }.get(frequency.lower())
+    # Define the resampling rules
+    resample_rules = {
+        'd': None,     # Special case - no resampling
+        'D': None,     # Special case - no resampling
+        'w': 'W-FRI',  # Week ending Friday
+        'W': 'W-FRI',
+        'm': 'ME',     # Month end
+        'M': 'ME',
+        'q': 'Q-DEC',  # Quarter end (December fiscal year end)
+        'Q': 'Q-DEC',
+        'y': 'A-DEC',  # Annual end (December fiscal year end)
+        'Y': 'A-DEC'
+    }
 
-    if not resample_rule:
-        raise ValueError("Frequency must be one of 'd', 'w', 'm', 'q', 'y'.")
+    # Get the resampling rule
+    resample_rule = resample_rules.get(frequency)
+    if resample_rule is None:
+        if frequency.lower() != 'd':
+            valid_freqs = "', '".join(['d', 'w', 'W', 'm', 'M', 'q', 'Q', 'y', 'Y'])
+            raise ValueError(f"Invalid frequency. Use one of: '{valid_freqs}'")
+        
+        # Handle daily frequency - just copy values
+        ohlc = pd.DataFrame(index=data.index)
+        ohlc['Open'] = data.iloc[:, 0]
+        ohlc['High'] = data.iloc[:, 0]
+        ohlc['Low'] = data.iloc[:, 0]
+        ohlc['Close'] = data.iloc[:, 0]
+        return ohlc
 
-    # Resample and calculate OHLC
+    # Resample and calculate OHLC for other frequencies
     ohlc = data.resample(resample_rule).agg(['first', 'max', 'min', 'last'])
     ohlc.columns = ['Open', 'High', 'Low', 'Close']
 
