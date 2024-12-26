@@ -5,6 +5,19 @@ import logging
 from pathlib import Path
 
 def fetch_bloomberg_data(mapping, start_date='2000-01-01', end_date=None, periodicity='D', align_start=False):
+    """
+    Fetch Bloomberg data for multiple securities and fields.
+    
+    Args:
+        mapping (dict): Dictionary mapping (ticker, field) tuples to column names
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str, optional): End date in YYYY-MM-DD format. Defaults to today.
+        periodicity (str): Data frequency ('D' for daily, 'M' for monthly, etc.)
+        align_start (bool): If True, align all series to start from the latest first valid date
+    
+    Returns:
+        pd.DataFrame: DataFrame with datetime index and requested data columns
+    """
     if end_date is None:
         end_date = pd.Timestamp('today').strftime('%Y-%m-%d')
     
@@ -18,6 +31,9 @@ def fetch_bloomberg_data(mapping, start_date='2000-01-01', end_date=None, period
         end_date=end_date,
         Per=periodicity
     )
+    
+    # Ensure index is datetime
+    df_raw.index = pd.to_datetime(df_raw.index)
     
     df_raw.columns = df_raw.columns.to_flat_index()
     df_raw.rename(columns=lambda col: mapping.get(col, f"{col[0]}|{col[1]}"), inplace=True)
@@ -45,6 +61,10 @@ def fetch_bloomberg_data(mapping, start_date='2000-01-01', end_date=None, period
     final_df = final_df.loc[~final_df.index.duplicated(keep='first')].copy()
     final_df.sort_index(inplace=True)
     final_df.index.name = 'Date'
+    
+    # Final check to ensure datetime index
+    if not isinstance(final_df.index, pd.DatetimeIndex):
+        final_df.index = pd.to_datetime(final_df.index)
     
     return final_df
 
