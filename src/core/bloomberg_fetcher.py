@@ -1,8 +1,52 @@
 import pandas as pd
 from xbbg import blp
-from typing import List, Dict, Optional
-from pathlib import Path
+from typing import List, Dict, Optional, Tuple
 import logging
+from pathlib import Path
+
+def fetch_bloomberg_data(mapping, start_date='2000-01-01', end_date=None, periodicity='D', align_start=False):
+    if end_date is None:
+        end_date = pd.Timestamp('today').strftime('%Y-%m-%d')
+    
+    tickers = list({k[0] for k in mapping.keys()})
+    fields = list({k[1] for k in mapping.keys()})
+    
+    df_raw = blp.bdh(
+        tickers=tickers,
+        flds=fields,
+        start_date=start_date,
+        end_date=end_date,
+        Per=periodicity
+    )
+    
+    df_raw.columns = df_raw.columns.to_flat_index()
+    df_raw.rename(columns=lambda col: mapping.get(col, f"{col[0]}|{col[1]}"), inplace=True)
+    
+    desired_order = [mapping[pair] for pair in mapping]
+    final_df = df_raw[[c for c in desired_order if c in df_raw.columns]]
+    
+    if align_start:
+        first_valid_per_col = []
+        for col in final_df.columns:
+            first_valid = final_df[col].first_valid_index()
+            if first_valid is not None:
+                first_valid_per_col.append(first_valid)
+        if first_valid_per_col:
+            start_cutoff = max(first_valid_per_col)
+            final_df = final_df.loc[final_df.index >= start_cutoff]
+    
+    # Make a copy here before forward-fill
+    final_df = final_df.copy()
+    
+    # Forward-fill
+    final_df = final_df.ffill()
+    
+    # Drop duplicates, sort index, etc.
+    final_df = final_df.loc[~final_df.index.duplicated(keep='first')].copy()
+    final_df.sort_index(inplace=True)
+    final_df.index.name = 'Date'
+    
+    return final_df
 
 class BloombergDataFetcher:
     """Class to fetch and process Bloomberg data."""

@@ -1,11 +1,10 @@
-import pdblp
 import pandas as pd
 from typing import Dict, Tuple, Optional
+from xbbg import blp
 
 class BloombergDirect:
     def __init__(self):
-        self.con = pdblp.BCon(debug=False, port=8194, timeout=5000)
-        self.con.start()
+        pass
 
     def fetch_bloomberg_data(
         self,
@@ -31,12 +30,10 @@ class BloombergDirect:
         if end_date is None:
             end_date = pd.Timestamp('today').strftime('%Y-%m-%d')
         
-        # Extract unique tickers and fields from mapping
         tickers = list({k[0] for k in mapping.keys()})
         fields = list({k[1] for k in mapping.keys()})
         
-        # Fetch raw data from Bloomberg
-        df_raw = self.con.bdh(
+        df_raw = blp.bdh(
             tickers=tickers,
             flds=fields,
             start_date=start_date,
@@ -44,15 +41,12 @@ class BloombergDirect:
             Per=periodicity
         )
         
-        # Process the DataFrame
         df_raw.columns = df_raw.columns.to_flat_index()
         df_raw.rename(columns=lambda col: mapping.get(col, f"{col[0]}|{col[1]}"), inplace=True)
         
-        # Reorder columns according to input mapping
         desired_order = [mapping[pair] for pair in mapping]
         final_df = df_raw[[c for c in desired_order if c in df_raw.columns]]
         
-        # Align start dates if requested
         if align_start:
             first_valid_per_col = []
             for col in final_df.columns:
@@ -63,13 +57,13 @@ class BloombergDirect:
                 start_cutoff = max(first_valid_per_col)
                 final_df = final_df.loc[final_df.index >= start_cutoff]
         
-        # Make a copy before forward-fill
+        # Make a copy here before forward-fill
         final_df = final_df.copy()
         
-        # Forward-fill missing values
+        # Forward-fill
         final_df = final_df.ffill()
         
-        # Clean up the DataFrame
+        # Drop duplicates, sort index, etc.
         final_df = final_df.loc[~final_df.index.duplicated(keep='first')].copy()
         final_df.sort_index(inplace=True)
         final_df.index.name = 'Date'
@@ -79,6 +73,6 @@ class BloombergDirect:
     def __del__(self):
         """Cleanup connection when object is destroyed"""
         try:
-            self.con.stop()
+            pass  # No connection to stop for xbbg
         except:
             pass
