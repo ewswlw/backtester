@@ -49,7 +49,15 @@ class Strategy(ABC):
         
         # Trading metrics
         n_trades = (signals != signals.shift(1)).sum()
-        win_rate = (returns[returns != 0] > 0).mean() if len(returns[returns != 0]) > 0 else 0
+        
+        # For buy and hold (constant True signals), look at all returns
+        # For active strategies, only look at returns when invested
+        is_buy_and_hold = signals.all() and len(signals.unique()) == 1
+        if is_buy_and_hold:
+            win_rate = (returns > 0).mean()
+        else:
+            win_rate = (returns[returns != 0] > 0).mean() if len(returns[returns != 0]) > 0 else 0
+            
         avg_win = returns[returns > 0].mean() if len(returns[returns > 0]) > 0 else 0
         avg_loss = returns[returns < 0].mean() if len(returns[returns < 0]) > 0 else 0
         
@@ -159,43 +167,3 @@ class Strategy(ABC):
         returns = self._calculate_returns(signals)
         metrics = self._calculate_metrics(returns, signals)
         return metrics
-
-def calculate_benchmark_metrics(df: pd.DataFrame, target_col: str = 'cad_ig_er_ytd_index') -> Dict:
-    """
-    Calculate buy & hold benchmark metrics.
-    
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        DataFrame containing the target column
-    target_col : str
-        Name of the target column
-        
-    Returns:
-    --------
-    Dict
-        Dictionary containing benchmark metrics
-    """
-    # Calculate returns manually first for verification
-    price_series = df[target_col]
-    total_return = (price_series.iloc[-1] / price_series.iloc[0]) - 1
-    n_years = (df.index[-1] - df.index[0]).days / 365.25
-    annual_return = (1 + total_return) ** (1/n_years) - 1
-    
-    print("\nBuy & Hold Manual Calculation:")
-    print(f"Total Return: {total_return:.2%}")
-    print(f"Annual Return: {annual_return:.2%}")
-    
-    # Run vectorbt backtest
-    portfolio = vbt.Portfolio.from_holding(close=df[target_col], freq='1D')
-    
-    metrics = {
-        'strategy_name': 'Buy & Hold',
-        'total_return': total_return,
-        'annual_return': annual_return,
-        'sharpe_ratio': portfolio.sharpe_ratio(),
-        'max_drawdown': portfolio.max_drawdown(),
-        'total_trades': 1  # Buy & hold is just one trade
-    }
-    
-    return metrics
