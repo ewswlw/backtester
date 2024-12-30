@@ -17,7 +17,7 @@ from strategy_3_mean_reversion import MeanReversionStrategy
 from strategy_4_multi_factor import MultiFactorStrategy
 from strategy_5_volatility_regime import VolatilityRegimeStrategy
 from strategy_6_adaptive_trend import AdaptiveTrendStrategy
-from strategy_7_ml_ensemble import MLEnsembleStrategy
+# from strategy_7_ml_ensemble import MLEnsembleStrategy
 from strategy_8_combined import CombinedStrategy
 from strategy_analysis import print_strategy_analysis
 
@@ -94,7 +94,7 @@ def main():
         MultiFactorStrategy(df),
         VolatilityRegimeStrategy(df),
         AdaptiveTrendStrategy(df),
-        MLEnsembleStrategy(df),
+        # MLEnsembleStrategy(df),
         CombinedStrategy(df)
     ]
     

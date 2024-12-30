@@ -52,6 +52,9 @@ def setup_logging() -> None:
     if config_path.exists():
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
+            # Create logs directory if it doesn't exist
+            logs_dir = project_root / 'logs'
+            logs_dir.mkdir(exist_ok=True)
             # Modify log file paths to use absolute paths
             for handler in config['handlers'].values():
                 if 'filename' in handler:
