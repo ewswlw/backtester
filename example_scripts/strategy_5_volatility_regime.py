@@ -48,7 +48,7 @@ class VolatilityRegimeStrategy(Strategy):
                             
         return -vol_premium_zscore  # Negative because high premium = bad
         
-    def _calculate_cross_asset_correlation(self) -> pd.Series:
+    def _calculate_correlation_score(self) -> pd.Series:
         """Calculate dynamic correlations with other assets"""
         # Calculate returns for target and other assets
         target_returns = self.df[self.target_col].pct_change()
@@ -91,7 +91,7 @@ class VolatilityRegimeStrategy(Strategy):
         """Generate trading signals based on volatility regime"""
         # Calculate component scores
         vol_surface_score = self._calculate_vol_surface_score()
-        correlation_score = self._calculate_cross_asset_correlation()
+        correlation_score = self._calculate_correlation_score()
         vol_regime = self._calculate_vol_regime()
         
         # Calculate trend strength
