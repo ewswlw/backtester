@@ -161,9 +161,108 @@ class Strategy(ABC):
         
         return int(drawdown_lengths.max()) if len(drawdown_lengths) > 0 else 0
     
-    def backtest(self) -> dict:
-        """Run backtest and return performance metrics"""
+    def backtest(self, start_date: str = None, end_date: str = None, 
+                rebalance_freq: str = '1D', init_cash: float = 100.0, 
+                fees: float = 0.0, slippage: float = 0.0,
+                risk_free: float = 0.0) -> dict:
+        """Run backtest and return performance metrics
+        
+        Args:
+            start_date (str, optional): Start date for backtest. Format: 'YYYY-MM-DD'
+            end_date (str, optional): End date for backtest. Format: 'YYYY-MM-DD'
+            rebalance_freq (str, optional): Rebalancing frequency. Default: '1D'
+            init_cash (float, optional): Initial cash amount. Default: 100.0
+            fees (float, optional): Trading fees as percentage. Default: 0.0
+            slippage (float, optional): Slippage as percentage. Default: 0.0
+            risk_free (float, optional): Risk-free rate for Sharpe ratio. Default: 0.0
+            
+        Returns:
+            dict: Dictionary containing backtest metrics
+        """
+        # Generate signals and filter date range
         signals = self.generate_signals()
-        returns = self._calculate_returns(signals)
-        metrics = self._calculate_metrics(returns, signals)
-        return metrics
+        if start_date:
+            signals = signals[start_date:]
+        if end_date:
+            signals = signals[:end_date]
+            
+        # Get price data for the same period
+        price = self.df[self.target_col][signals.index[0]:signals.index[-1]]
+        
+        # Create portfolio with vectorbt
+        portfolio = vbt.Portfolio.from_signals(
+            price,
+            signals,
+            init_cash=init_cash,
+            fees=fees,
+            slippage=slippage,
+            freq=rebalance_freq,
+            log=True  # Enable logging for detailed metrics
+        )
+        
+        # Get portfolio metrics
+        total_return = portfolio.total_return()
+        returns = portfolio.returns()
+        returns_stats = returns.vbt.returns(freq='1D', year_freq='365D')
+        
+        # Core metrics using returns_stats
+        annual_return = returns_stats.annualized()
+        daily_vol = returns_stats.annualized_volatility()
+        
+        # Calculate downside volatility manually using negative returns
+        negative_returns = returns[returns < 0]
+        downside_vol = np.sqrt(252) * np.sqrt(np.mean(negative_returns**2)) if len(negative_returns) > 0 else 0
+        
+        max_drawdown = returns_stats.max_drawdown()
+        
+        # Risk-adjusted metrics using returns_stats
+        sharpe = returns_stats.sharpe_ratio()
+        sortino = annual_return / downside_vol if downside_vol != 0 else 0
+        calmar = -annual_return / max_drawdown if max_drawdown != 0 else 0
+        
+        # Trading metrics
+        trades = portfolio.trades
+        n_trades = len(trades)
+        win_rate = trades.win_rate() if n_trades > 0 else 0
+        
+        # Calculate average win/loss using trades accessor
+        avg_win = trades.winning.returns.mean() if len(trades.winning) > 0 else 0
+        avg_loss = trades.losing.returns.mean() if len(trades.losing) > 0 else 0
+        profit_factor = trades.profit_factor() if n_trades > 0 else np.inf
+        
+        # Duration metrics
+        avg_win_duration = trades.winning.duration.mean() if len(trades.winning) > 0 else pd.NaT
+        avg_loss_duration = trades.losing.duration.mean() if len(trades.losing) > 0 else pd.NaT
+        
+        # Market coverage and exposure
+        market_coverage = signals.mean()
+        exposure = portfolio.net_exposure()
+        
+        # Risk metrics using returns_stats
+        var = returns_stats.value_at_risk(cutoff=0.05)  # 5% VaR
+        cvar = returns_stats.cond_value_at_risk(cutoff=0.05)  # 5% CVaR
+        
+        # Return metrics dictionary
+        return {
+            'start_date': signals.index[0],
+            'end_date': signals.index[-1],
+            'total_return': total_return,
+            'annual_return': annual_return,
+            'daily_vol': daily_vol,
+            'downside_vol': downside_vol,
+            'max_drawdown': max_drawdown,
+            'sharpe_ratio': sharpe,
+            'sortino_ratio': sortino,
+            'calmar_ratio': calmar,
+            'total_trades': n_trades,
+            'win_rate': win_rate,
+            'avg_win': avg_win,
+            'avg_loss': avg_loss,
+            'profit_factor': profit_factor,
+            'avg_win_duration': avg_win_duration,
+            'avg_loss_duration': avg_loss_duration,
+            'market_coverage': market_coverage,
+            'exposure': exposure,
+            'value_at_risk': var,
+            'cvar': cvar
+        }

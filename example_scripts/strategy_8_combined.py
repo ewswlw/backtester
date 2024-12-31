@@ -1,10 +1,10 @@
-from .strategy_framework import Strategy
+from strategy_framework import Strategy
 import pandas as pd
 import numpy as np
-from .strategy_4_multi_factor import MultiFactorStrategy
-from .strategy_5_volatility_regime import VolatilityRegimeStrategy
-from .strategy_6_adaptive_trend import AdaptiveTrendStrategy
-from .strategy_7_ml_ensemble import MLEnsembleStrategy
+from strategy_4_multi_factor import MultiFactorStrategy
+from strategy_5_volatility_regime import VolatilityRegimeStrategy
+from strategy_6_adaptive_trend import AdaptiveTrendStrategy
+from strategy_7_ml_ensemble import MLEnsembleStrategy
 
 class CombinedStrategy(Strategy):
     """

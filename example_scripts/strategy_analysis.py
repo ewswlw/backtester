@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict
 import vectorbt as vbt
-from .strategy_framework import Strategy
-from .strategy_0_buy_and_hold import BuyAndHoldStrategy
+from strategy_framework import Strategy
+from strategy_0_buy_and_hold import BuyAndHoldStrategy
 
 def calculate_annual_return(total_return: float, days: int) -> float:
     """Calculate annualized return from total return and number of days"""

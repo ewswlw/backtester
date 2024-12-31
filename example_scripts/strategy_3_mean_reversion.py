@@ -1,4 +1,4 @@
-from .strategy_framework import Strategy
+from strategy_framework import Strategy
 import pandas as pd
 import numpy as np
 from scipy import stats

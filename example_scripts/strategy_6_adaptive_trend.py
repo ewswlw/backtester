@@ -1,4 +1,4 @@
-from .strategy_framework import Strategy
+from strategy_framework import Strategy
 import pandas as pd
 import numpy as np
 from scipy import signal
@@ -126,14 +126,18 @@ class AdaptiveTrendStrategy(Strategy):
         print(f"Average Lookback Period: {avg_lookback} days")
         
         # Determine regime with more lenient conditions
-        trending_market = trend_strength > self.min_trend_strength
-        efficient_market = efficiency_ratio > 0.3
+        trending_market = trend_strength > 0.3
+        efficient_market = efficiency_ratio > 0.25
         
         # Generate signals based on regime with adjusted thresholds
         trend_signals = trending_market & (trend.diff() > 0)  
-        reversion_signals = (~trending_market) & (cycle_score > 0.5)  
+        reversion_signals = (~trending_market) & (cycle_score > 0.4)  
         
         # Combine signals - binary only (in/out)
         signals = trend_signals | reversion_signals
         
-        return signals.fillna(False)
+        # Resample to monthly frequency to match original implementation
+        signals = signals.resample('M').last()
+        
+        # Forward fill the signals to match daily price data
+        return signals.reindex(self.df.index).fillna(method='ffill').fillna(False)

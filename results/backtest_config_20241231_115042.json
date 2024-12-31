@@ -1,0 +1,9 @@
+{
+    "start_date": "2002-10-31",
+    "end_date": "2024-12-27",
+    "rebalance_freq": "1D",
+    "init_cash": 100.0,
+    "fees": 0.001,
+    "slippage": 0.001,
+    "risk_free": 0.02
+}
