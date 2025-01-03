@@ -1,0 +1,16 @@
+backtest_settings:
+  start_date: '2003-01-01'
+  end_date: '2024-12-31'
+  rebalance_freq: '1D'
+  initial_capital: 100.0
+  size: 1.0
+  size_type: 'percent'
+
+data:
+  file_path: 'pulling_data/backtest_data.csv'
+  target_column: 'cad_ig_er_index'
+
+strategies:
+  MA:
+    ma_window: 20
+    entry_threshold: 0.001
