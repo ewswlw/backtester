@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import pandas as pd
 import vectorbt as vbt
+import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
@@ -23,11 +24,19 @@ class BacktestConfig:
     size_type: str
 
 class StrategyBase(ABC):
-    """Base class for all trading strategies"""
+    """Base class for all trading strategies."""
     
     def __init__(self, config: BacktestConfig):
         """Initialize strategy with configuration."""
         self.config = config
+        if isinstance(config, dict):
+            self.initial_capital = config['backtest_settings']['initial_capital']
+            self.size = config['backtest_settings']['size']
+            self.size_type = config['backtest_settings']['size_type']
+        else:
+            self.initial_capital = config.initial_capital
+            self.size = config.size
+            self.size_type = config.size_type
         self._portfolio = None
         self._signals = None
     
@@ -44,34 +53,51 @@ class StrategyBase(ABC):
         pass
     
     def backtest(self, price_series: pd.Series) -> vbt.Portfolio:
-        """Run backtest for the strategy"""
+        """Run backtest for the strategy."""
         # Generate signals
-        self._signals = self.generate_signals(price_series.to_frame())
+        if isinstance(price_series, pd.Series):
+            data = price_series.to_frame()
+        else:
+            data = price_series
+            
+        signals = self.generate_signals(data)
         
-        # Convert to pandas Series if DataFrame is returned
-        if isinstance(self._signals, pd.DataFrame):
-            self._signals = self._signals.iloc[:, 0]
+        # Ensure signals is a Series
+        if isinstance(signals, pd.DataFrame):
+            signals = signals.iloc[:, 0]
         
-        # Ensure boolean type
-        self._signals = self._signals.astype(bool)
+        # Create entries and exits
+        entries = signals & ~signals.shift(1, fill_value=False)  # Entry when signal changes from False to True
+        exits = ~signals & signals.shift(1, fill_value=False)  # Exit when signal changes from True to False
         
-        # Generate entry/exit signals
-        shifted_signals = pd.Series(False, index=self._signals.index)  # Initialize with False
-        shifted_signals[1:] = self._signals[:-1]  # Copy values without using fillna
-        
-        entries = self._signals & ~shifted_signals
-        exits = ~self._signals & shifted_signals
+        # Ensure price series is valid
+        price_series = price_series.replace([np.inf, -np.inf], np.nan).dropna()
+        if len(price_series) == 0:
+            raise ValueError("No valid prices found in price series")
+            
+        # Normalize price series to start at 100
+        price_series = 100 * price_series / price_series.iloc[0]
         
         # Create portfolio
         portfolio = vbt.Portfolio.from_signals(
-            price_series,
+            close=price_series,
             entries=entries,
             exits=exits,
-            init_cash=self.config.initial_capital,
-            size=self.config.size,
-            size_type=self.config.size_type,
-            freq='1D'  # Always use daily frequency
+            init_cash=self.initial_capital,
+            size=self.size,
+            size_type=self.size_type,
+            freq='1D',  # Always use daily frequency
+            direction='longonly',  # Only long positions
+            accumulate=False,  # Don't accumulate positions
+            upon_long_conflict='ignore',  # Ignore new signals if already in position
+            upon_dir_conflict='ignore',  # Ignore signals in opposite direction
+            upon_opposite_entry='ignore',  # Ignore entry signals in opposite direction
+            log=True  # Enable logging for debugging
         )
+        
+        # Store portfolio for later analysis
+        self._portfolio = portfolio
+        self._signals = signals
         
         return portfolio
     

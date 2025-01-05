@@ -1,10 +1,10 @@
 backtest_settings:
-  start_date: '2003-01-01'
+  start_date: '2002-01-01'
   end_date: '2024-12-31'
-  rebalance_freq: '1D'
+  rebalance_freq: 'M'
   initial_capital: 100.0
-  size: 1.0
-  size_type: 'percent'
+  size: 100.0  # Changed to match initial capital for full investment
+  size_type: 'value'  # Using value for fixed position size
 
 data:
   file_path: 'pulling_data/backtest_data.csv'
@@ -12,5 +12,15 @@ data:
 
 strategies:
   MA:
-    ma_window: 20
+    ma_window: 10
     entry_threshold: 0.001
+  BuyAndHold:
+    min_holding_period: 1
+  ComplexRegime:
+    min_holding_period: 1
+    signal_threshold: 0.2
+  TrendRisk:
+    min_holding_period: 1
+    signal_threshold: 0.2
+    vol_target: 0.10
+    max_leverage: 2.0

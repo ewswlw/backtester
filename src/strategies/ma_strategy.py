@@ -15,7 +15,7 @@ class MovingAverageStrategy(StrategyBase):
     """Moving average crossover strategy."""
     
     def __init__(self, config: Dict[str, Any]):
-        """Initialize the strategy with configuration."""
+        """Initialize MA strategy."""
         super().__init__(BacktestConfig(**config['backtest_settings']))
         self.ma_config = MAConfig(**config['strategies']['MA'])
     
