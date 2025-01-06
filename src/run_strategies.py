@@ -1,13 +1,22 @@
 import os
+import sys
 import yaml
 import pandas as pd
-import vectorbt as vbt
 from typing import Dict, Any
 
-from strategies.ma_strategy import MovingAverageStrategy
-from strategies.buy_and_hold_strategy import BuyAndHoldStrategy
-from strategies.complex_regime_strategy import ComplexRegimeStrategy
-from strategies.trend_risk_strategy import TrendRiskStrategy
+# Add project root to path for interactive window
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+# Try both import styles to support both script and interactive modes
+try:
+    from src.strategies.ma_strategy import MovingAverageStrategy
+    from src.strategies.buy_and_hold_strategy import BuyAndHoldStrategy
+except ImportError:
+    from strategies.ma_strategy import MovingAverageStrategy
+    from strategies.buy_and_hold_strategy import BuyAndHoldStrategy
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from YAML file."""
@@ -16,7 +25,13 @@ def load_config() -> Dict[str, Any]:
     config_path = os.path.join(project_root, 'config', 'backtest_config.yaml')
     
     with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    
+    # Convert relative path to absolute path
+    if 'data' in config and 'file_path' in config['data']:
+        config['data']['file_path'] = os.path.join(project_root, config['data']['file_path'])
+    
+    return config
 
 def load_data(data_path: str) -> pd.DataFrame:
     """Load and prepare data for backtesting."""
@@ -28,7 +43,7 @@ def load_data(data_path: str) -> pd.DataFrame:
     df.set_index('Date', inplace=True)
     return df.ffill().bfill()
 
-def analyze_portfolio(portfolio: vbt.Portfolio, name: str) -> pd.Series:
+def analyze_portfolio(portfolio: pd.Series, name: str) -> pd.Series:
     """Analyze portfolio performance and return key metrics."""
     # Calculate drawdown series
     drawdown = portfolio.drawdown()
@@ -81,9 +96,7 @@ def main():
     # Initialize strategies
     strategies = {
         'MA': MovingAverageStrategy(config),
-        'Buy & Hold': BuyAndHoldStrategy(config),
-        'Complex Regime': ComplexRegimeStrategy(config),
-        'Trend Risk': TrendRiskStrategy(config)
+        'Buy & Hold': BuyAndHoldStrategy(config)
     }
     
     # Run strategies and collect results
@@ -124,6 +137,8 @@ def main():
         print(f"CAGR: {comparison_df.loc[best_strategy, 'CAGR (%)']:.2f}%")
         print(f"Max Drawdown: {comparison_df.loc[best_strategy, 'Max Drawdown (%)']:.2f}%")
         print(f"Sharpe Ratio: {comparison_df.loc[best_strategy, 'Sharpe Ratio']:.2f}")
+    
+    return results, metrics, comparison_df if metrics else None
 
 if __name__ == "__main__":
     main()

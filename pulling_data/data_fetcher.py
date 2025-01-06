@@ -27,18 +27,17 @@ def fetch_market_data(start_date='2002-01-01', end_date=None):
 
     # Market data mapping
     market_data_mapping = {
-        ('I05510CA Index', 'INDEX_OAS_TSY_BP'): 'cad_oas',
-        ('LF98TRUU Index', 'INDEX_OAS_TSY_BP'): 'us_hy_oas',
-        ('LUACTRUU Index', 'INDEX_OAS_TSY_BP'): 'us_ig_oas',
-        ('SPTSX Index', 'PX_LAST'): 'tsx',
-        ('VIX Index', 'PX_LAST'): 'vix',
-        ('USYC3M30 Index', 'PX_LAST'): 'us_3m_10y',
-        ('BCMPUSGR Index', 'PX_LAST'): 'us_growth_surprises',
-        ('BCMPUSIF Index', 'PX_LAST'): 'us_inflation_surprises',
-        ('LEI YOY  Index', 'PX_LAST'): 'us_lei_yoy',
-        ('.HARDATA G Index', 'PX_LAST'): 'us_hard_data_surprises',
-        ('CGERGLOB Index', 'PX_LAST'): 'us_equity_revisions',
-        ('.ECONREGI G Index', 'PX_LAST'): 'us_economic_regime',
+        ('I05510CA Index', 'INDEX_OAS_TSY_BP'): 'cad_oas',  # CAD IG OAS
+        ('LF98TRUU Index', 'INDEX_OAS_TSY_BP'): 'us_hy_oas',  # US HY OAS
+        ('LUACTRUU Index', 'INDEX_OAS_TSY_BP'): 'us_ig_oas',  # US IG OAS
+        ('SPTSX Index', 'PX_LAST'): 'tsx',  # TSX Index
+        ('VIX Index', 'PX_LAST'): 'vix',  # VIX Index
+        ('USYC3M30 Index', 'PX_LAST'): 'us_3m_10y',  # US 3M-30Y Slope
+        ('BCMPUSGR Index', 'PX_LAST'): 'us_growth_surprises',  # US Growth Surprises
+        ('BCMPUSIF Index', 'PX_LAST'): 'us_inflation_surprises',  # US Inflation Surprises
+        ('LEI YOY  Index', 'PX_LAST'): 'us_lei_yoy',  # US LEI YoY
+        ('.HARDATA G Index', 'PX_LAST'): 'us_hard_data_surprises',  # US Hard Data Surprises
+        ('.ECONREGI G Index', 'PX_LAST'): 'us_economic_regime',  # US Economic Regime
     }
 
     # Excess return YTD mapping
@@ -53,7 +52,7 @@ def fetch_market_data(start_date='2002-01-01', end_date=None):
         mapping=market_data_mapping,
         start_date=start_date,
         end_date=end_date,
-        periodicity='D',
+        periodicity='M',  # Changed from 'D' to 'M' for monthly data
         align_start=True
     ).dropna()
 
@@ -62,7 +61,7 @@ def fetch_market_data(start_date='2002-01-01', end_date=None):
         mapping=er_ytd_mapping,
         start_date=start_date,
         end_date=end_date,
-        periodicity='D',
+        periodicity='M',  # Changed from 'D' to 'M' for monthly data
         align_start=True
     ).dropna()
 

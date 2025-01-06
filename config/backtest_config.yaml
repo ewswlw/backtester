@@ -16,11 +16,3 @@ strategies:
     entry_threshold: 0.001
   BuyAndHold:
     min_holding_period: 1
-  ComplexRegime:
-    min_holding_period: 1
-    signal_threshold: 0.2
-  TrendRisk:
-    min_holding_period: 1
-    signal_threshold: 0.2
-    vol_target: 0.10
-    max_leverage: 2.0
