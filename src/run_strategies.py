@@ -15,9 +15,11 @@ if project_root not in sys.path:
 try:
     from src.strategies.ma_strategy import MovingAverageStrategy
     from src.strategies.buy_and_hold_strategy import BuyAndHoldStrategy
+    from src.strategies.relative_value_strategy import RelativeValueStrategy
 except ImportError:
     from strategies.ma_strategy import MovingAverageStrategy
     from strategies.buy_and_hold_strategy import BuyAndHoldStrategy
+    from strategies.relative_value_strategy import RelativeValueStrategy
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from YAML file."""
@@ -99,6 +101,7 @@ def main():
     # Initialize strategies
     strategies = {
         'MA': MovingAverageStrategy(config),
+        'Relative Value': RelativeValueStrategy(config),
         'Buy & Hold': BuyAndHoldStrategy(config)
     }
     

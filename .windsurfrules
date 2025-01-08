@@ -35,6 +35,7 @@ Each strategy must seek to outperform a buy-and-hold benchmark of `cad_ig_er_ind
     - Explain how to run the backtest, specifying input parameters such as time range, columns used, and signal definitions.
     - Include code snippets or pseudocode demonstrating strategy setup.
     - Be an expert in this API and refer to documentation when needed. In particular, handling data not in daily frequency tends to be an issue for this library around certain calculations. Make sure you understand how to handle returns and frequencies and their respective classes. 
+    - should always be frequency aware and change parameters and logic accordingly
 
 4. **Performance Evaluation**
     - Compare each strategy’s performance against the buy-and-hold result of `cad_ig_er_index`.

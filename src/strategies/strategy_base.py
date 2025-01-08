@@ -67,8 +67,8 @@ class StrategyBase(ABC):
             signals = signals.iloc[:, 0]
         
         # Create entries and exits
-        entries = signals & ~signals.shift(1, fill_value=False)  # Entry when signal changes from False to True
-        exits = ~signals & signals.shift(1, fill_value=False)  # Exit when signal changes from True to False
+        entries = signals > 0  # Convert float signals to boolean for entries
+        exits = ~(signals > 0)  # Convert float signals to boolean for exits
         
         # Ensure price series is valid
         price_series = price_series.replace([np.inf, -np.inf], np.nan).dropna()
@@ -83,9 +83,8 @@ class StrategyBase(ABC):
             close=price_series,
             entries=entries,
             exits=exits,
+            size=signals,  # Use original signals for position sizing
             init_cash=self.initial_capital,
-            size=self.size,
-            size_type=self.size_type,
             freq='1D',  # Always use daily frequency
             direction='longonly',  # Only long positions
             accumulate=False,  # Don't accumulate positions
