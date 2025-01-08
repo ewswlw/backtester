@@ -2,6 +2,7 @@ import os
 import sys
 import yaml
 import pandas as pd
+import numpy as np
 from typing import Dict, Any
 
 # Add project root to path for interactive window
@@ -45,40 +46,35 @@ def load_data(data_path: str) -> pd.DataFrame:
 
 def analyze_portfolio(portfolio: pd.Series, name: str) -> pd.Series:
     """Analyze portfolio performance and return key metrics."""
-    # Calculate drawdown series
-    drawdown = portfolio.drawdown()
-    max_dd = abs(drawdown.min())  # Get absolute value of max drawdown
+    # Get returns with proper frequency settings
+    returns = portfolio.returns()
+    rets = returns.vbt.returns(freq='D')
     
-    # Calculate returns
-    total_return = portfolio.total_return()
-    
-    # Calculate CAGR
+    # Calculate annualized return manually
+    total_return = rets.total()
     days = (portfolio.wrapper.index[-1] - portfolio.wrapper.index[0]).days
-    cagr = ((1 + total_return) ** (365 / days) - 1) * 100
+    ann_return = ((1 + total_return) ** (365.25 / days) - 1) * 100
     
-    # Calculate risk-adjusted metrics
-    sharpe = portfolio.sharpe_ratio()
-    sortino = portfolio.sortino_ratio()
-    calmar = abs(total_return) / max_dd if max_dd > 0 else float('inf')
+    # Get other metrics from returns accessor
+    metrics = {
+        'Total Return [%]': total_return * 100,
+        'Annualized Return [%]': ann_return,  # Use manually calculated annualized return
+        'Annualized Volatility [%]': rets.annualized_volatility() * 100,
+        'Sharpe Ratio': rets.sharpe_ratio(),
+        'Sortino Ratio': rets.sortino_ratio(),
+        'Calmar Ratio': rets.calmar_ratio(),
+        'Omega Ratio': rets.omega_ratio(),
+        'Max Drawdown [%]': rets.max_drawdown() * 100,
+        'Value at Risk [%]': rets.value_at_risk() * 100,
+        'Conditional Value at Risk [%]': rets.cond_value_at_risk() * 100,
+        'Strategy': name
+    }
     
-    # Calculate trade metrics
-    stats = portfolio.stats()
-    win_rate = stats['Win Rate [%]'] / 100 if 'Win Rate [%]' in stats else 0
+    # Add trade statistics
+    trade_stats = portfolio.stats()
+    metrics.update({k: v for k, v in trade_stats.items() if k not in metrics})
     
-    # Store metrics
-    metrics = pd.Series({
-        'Strategy': name,
-        'Total Return (%)': total_return * 100,
-        'CAGR (%)': cagr,
-        'Max Drawdown (%)': max_dd * 100,
-        'Sharpe Ratio': sharpe,
-        'Sortino Ratio': sortino,
-        'Calmar Ratio': calmar,
-        'Win Rate (%)': win_rate * 100,
-        'Total Trades': stats.get('Total Trades', 0)
-    })
-    
-    return metrics
+    return pd.Series(metrics)
 
 def main():
     """Main function to run all strategies."""
@@ -100,45 +96,31 @@ def main():
     }
     
     # Run strategies and collect results
-    results = {}
-    metrics = []
-    
+    results = []
     for name, strategy in strategies.items():
-        try:
-            print(f"\nRunning {name} strategy...")
-            portfolio = strategy.backtest(price_series)
-            results[name] = portfolio
-            
-            # Calculate and store metrics
-            strategy_metrics = analyze_portfolio(portfolio, name)
-            metrics.append(strategy_metrics)
-            
-            # Print detailed stats
-            print(f"\n{name} Strategy Stats:")
-            print(portfolio.stats())
-            
-        except Exception as e:
-            print(f"Error running {name} strategy: {str(e)}")
-            continue
-    
-    if metrics:
-        # Create comparison DataFrame
-        comparison_df = pd.DataFrame(metrics)
-        comparison_df.set_index('Strategy', inplace=True)
+        print(f"\nRunning {name} strategy...")
+        portfolio = strategy.backtest(price_series)
         
-        # Print comparison
-        print("\nStrategy Comparison:")
-        print(comparison_df.round(2))
-        
-        # Find best strategy
-        best_strategy = comparison_df['Total Return (%)'].idxmax()
-        print(f"\nBest performing strategy: {best_strategy}")
-        print(f"Total Return: {comparison_df.loc[best_strategy, 'Total Return (%)']:.2f}%")
-        print(f"CAGR: {comparison_df.loc[best_strategy, 'CAGR (%)']:.2f}%")
-        print(f"Max Drawdown: {comparison_df.loc[best_strategy, 'Max Drawdown (%)']:.2f}%")
-        print(f"Sharpe Ratio: {comparison_df.loc[best_strategy, 'Sharpe Ratio']:.2f}")
+        # Get strategy stats
+        stats = analyze_portfolio(portfolio, name)
+        print(f"\n{name} Strategy Stats:")
+        print(stats)
+        results.append(stats)
     
-    return results, metrics, comparison_df if metrics else None
+    # Create comparison DataFrame
+    comparison_df = pd.DataFrame(results)
+    comparison_df.set_index('Strategy', inplace=True)
+    
+    print("\nStrategy Comparison:")
+    print(comparison_df)
+    
+    # Find best performing strategy
+    best_strategy = comparison_df.loc[comparison_df['Total Return [%]'].idxmax()]
+    print(f"\nBest performing strategy: {best_strategy.name}")
+    print(f"Total Return: {best_strategy['Total Return [%]']:.2f}%")
+    print(f"Annualized Return: {best_strategy['Annualized Return [%]']:.2f}%")
+    print(f"Annualized Volatility [%]: {best_strategy['Annualized Volatility [%]']:.2f}%")
+    print(f"Sharpe Ratio: {best_strategy['Sharpe Ratio']:.2f}")
 
 if __name__ == "__main__":
     main()
