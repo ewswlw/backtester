@@ -48,17 +48,23 @@ def analyze_portfolio(portfolio: pd.Series, name: str) -> pd.Series:
     """Analyze portfolio performance and return key metrics."""
     # Get returns with proper frequency settings
     returns = portfolio.returns()
-    rets = returns.vbt.returns(freq='D')
     
-    # Calculate annualized return manually
+    # Get index frequency info and convert to days
+    index_diff = portfolio.wrapper.index[1] - portfolio.wrapper.index[0]
+    freq = f"{index_diff.days}D"
+    freq_days = index_diff.days
+    
+    rets = returns.vbt.returns(freq=freq)
+    
+    # Calculate annualized return based on total period
     total_return = rets.total()
-    days = (portfolio.wrapper.index[-1] - portfolio.wrapper.index[0]).days
-    ann_return = ((1 + total_return) ** (365.25 / days) - 1) * 100
+    total_days = (portfolio.wrapper.index[-1] - portfolio.wrapper.index[0]).days
+    ann_return = ((1 + total_return) ** (365.25 / total_days) - 1) * 100
     
     # Get other metrics from returns accessor
     metrics = {
         'Total Return [%]': total_return * 100,
-        'Annualized Return [%]': ann_return,  # Use manually calculated annualized return
+        'Annualized Return [%]': ann_return,  # Use period-based annualized return
         'Annualized Volatility [%]': rets.annualized_volatility() * 100,
         'Sharpe Ratio': rets.sharpe_ratio(),
         'Sortino Ratio': rets.sortino_ratio(),
@@ -67,7 +73,8 @@ def analyze_portfolio(portfolio: pd.Series, name: str) -> pd.Series:
         'Max Drawdown [%]': rets.max_drawdown() * 100,
         'Value at Risk [%]': rets.value_at_risk() * 100,
         'Conditional Value at Risk [%]': rets.cond_value_at_risk() * 100,
-        'Strategy': name
+        'Strategy': name,
+        'Data Frequency': f"{freq_days} days"
     }
     
     # Add trade statistics
