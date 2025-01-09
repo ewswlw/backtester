@@ -15,11 +15,11 @@ if project_root not in sys.path:
 try:
     from src.strategies.ma_strategy import MovingAverageStrategy
     from src.strategies.buy_and_hold_strategy import BuyAndHoldStrategy
-    from src.strategies.relative_value_strategy import RelativeValueStrategy
+    from src.strategies.hy_timing_strategy import HYTimingStrategy
 except ImportError:
     from strategies.ma_strategy import MovingAverageStrategy
     from strategies.buy_and_hold_strategy import BuyAndHoldStrategy
-    from strategies.relative_value_strategy import RelativeValueStrategy
+    from strategies.hy_timing_strategy import HYTimingStrategy
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from YAML file."""
@@ -46,44 +46,100 @@ def load_data(data_path: str) -> pd.DataFrame:
     df.set_index('Date', inplace=True)
     return df.ffill().bfill()
 
-def analyze_portfolio(portfolio: pd.Series, name: str) -> pd.Series:
+def analyze_portfolio(portfolio, name: str) -> pd.Series:
     """Analyze portfolio performance and return key metrics."""
-    # Get returns with proper frequency settings
-    returns = portfolio.returns()
+    # Convert Portfolio object to Series if needed
+    if hasattr(portfolio, 'returns'):
+        portfolio_series = pd.Series(portfolio.value(), index=portfolio.wrapper.index)
+    else:
+        portfolio_series = portfolio
+        
+    # Calculate returns
+    returns = portfolio_series.pct_change().fillna(0)
     
-    # Get index frequency info and convert to days
-    index_diff = portfolio.wrapper.index[1] - portfolio.wrapper.index[0]
-    freq = f"{index_diff.days}D"
-    freq_days = index_diff.days
+    # Calculate basic metrics
+    total_return = ((portfolio_series.iloc[-1] / portfolio_series.iloc[0]) - 1) * 100
     
-    rets = returns.vbt.returns(freq=freq)
+    # Calculate years based on actual date difference
+    start_date = portfolio_series.index[0]
+    end_date = portfolio_series.index[-1]
+    years = (end_date - start_date).days / 365.25
     
-    # Calculate annualized return based on total period
-    total_return = rets.total()
-    total_days = (portfolio.wrapper.index[-1] - portfolio.wrapper.index[0]).days
-    ann_return = ((1 + total_return) ** (365.25 / total_days) - 1) * 100
+    # Calculate annualized return properly
+    ann_return = ((1 + total_return/100) ** (1/years) - 1) * 100
     
-    # Get other metrics from returns accessor
-    metrics = {
-        'Total Return [%]': total_return * 100,
-        'Annualized Return [%]': ann_return,  # Use period-based annualized return
-        'Annualized Volatility [%]': rets.annualized_volatility() * 100,
-        'Sharpe Ratio': rets.sharpe_ratio(),
-        'Sortino Ratio': rets.sortino_ratio(),
-        'Calmar Ratio': rets.calmar_ratio(),
-        'Omega Ratio': rets.omega_ratio(),
-        'Max Drawdown [%]': rets.max_drawdown() * 100,
-        'Value at Risk [%]': rets.value_at_risk() * 100,
-        'Conditional Value at Risk [%]': rets.cond_value_at_risk() * 100,
+    # Calculate volatility (adjust for monthly data)
+    monthly_vol = returns.std() * np.sqrt(12)  # Annualize monthly volatility
+    ann_vol = monthly_vol * 100
+    
+    # Calculate Sharpe Ratio (assuming 0% risk-free rate for simplicity)
+    sharpe = ann_return / ann_vol if ann_vol != 0 else 0
+    
+    # Calculate Sortino Ratio
+    downside_returns = returns[returns < 0]
+    downside_vol = downside_returns.std() * np.sqrt(12) * 100  # Annualize monthly downside volatility
+    sortino = ann_return / downside_vol if downside_vol != 0 else 0
+    
+    # Calculate drawdown
+    rolling_max = portfolio_series.expanding().max()
+    drawdown = ((portfolio_series - rolling_max) / rolling_max) * 100
+    max_drawdown = drawdown.min()
+    
+    # Calculate Calmar Ratio
+    calmar = abs(ann_return / max_drawdown) if max_drawdown != 0 else 0
+    
+    # Calculate Omega Ratio
+    threshold = 0
+    gains = returns[returns > threshold]
+    losses = returns[returns <= threshold]
+    omega = abs(gains.mean() / losses.mean()) if len(losses) > 0 and losses.mean() != 0 else float('inf')
+    
+    # Calculate Value at Risk and Conditional VaR
+    var_95 = np.percentile(returns, 5) * 100
+    cvar_95 = returns[returns <= np.percentile(returns, 5)].mean() * 100
+    
+    # Trading statistics
+    position_changes = (returns != 0).astype(int).diff()
+    total_trades = (position_changes != 0).sum() // 2
+    
+    metrics = pd.Series({
+        'Total Return [%]': total_return,
+        'Annualized Return [%]': ann_return,
+        'Annualized Volatility [%]': ann_vol,
+        'Sharpe Ratio': sharpe,
+        'Sortino Ratio': sortino,
+        'Calmar Ratio': calmar,
+        'Omega Ratio': omega,
+        'Max Drawdown [%]': max_drawdown,
+        'Value at Risk [%]': var_95,
+        'Conditional Value at Risk [%]': cvar_95,
         'Strategy': name,
-        'Data Frequency': f"{freq_days} days"
-    }
+        'Data Frequency': f"{(portfolio_series.index[1] - portfolio_series.index[0]).days} days",
+        'Start': portfolio_series.index[0],
+        'End': portfolio_series.index[-1],
+        'Period': portfolio_series.index[-1] - portfolio_series.index[0],
+        'Start Value': portfolio_series.iloc[0],
+        'End Value': portfolio_series.iloc[-1],
+        'Benchmark Return [%]': total_return,
+        'Max Gross Exposure [%]': 100.0,
+        'Total Fees Paid': 0.0,
+        'Max Drawdown Duration': f"{(-drawdown > 0).groupby((-drawdown > 0).ne(-drawdown > 0).cumsum()).cumcount().max()} days",
+        'Total Trades': total_trades,
+        'Total Closed Trades': total_trades - 1 if total_trades > 0 else 0,
+        'Total Open Trades': 1 if total_trades > 0 else 0,
+        'Open Trade PnL': portfolio_series.iloc[-1] - portfolio_series.iloc[0] if total_trades > 0 else 0,
+        'Win Rate [%]': np.nan,
+        'Best Trade [%]': np.nan,
+        'Worst Trade [%]': np.nan,
+        'Avg Winning Trade [%]': np.nan,
+        'Avg Losing Trade [%]': np.nan,
+        'Avg Winning Trade Duration': pd.NaT,
+        'Avg Losing Trade Duration': pd.NaT,
+        'Profit Factor': np.nan,
+        'Expectancy': np.nan
+    })
     
-    # Add trade statistics
-    trade_stats = portfolio.stats()
-    metrics.update({k: v for k, v in trade_stats.items() if k not in metrics})
-    
-    return pd.Series(metrics)
+    return metrics
 
 def main():
     """Main function to run all strategies."""
@@ -101,7 +157,7 @@ def main():
     # Initialize strategies
     strategies = {
         'MA': MovingAverageStrategy(config),
-        'Relative Value': RelativeValueStrategy(config),
+        'HY Timing': HYTimingStrategy(config),
         'Buy & Hold': BuyAndHoldStrategy(config)
     }
     

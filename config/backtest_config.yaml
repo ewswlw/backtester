@@ -16,3 +16,5 @@ strategies:
     entry_threshold: 0.001
   BuyAndHold:
     min_holding_period: 1
+  HYTiming:
+    ma_window: 5  # Default value, will be optimized
