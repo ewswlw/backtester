@@ -42,6 +42,9 @@ filterpy = "^1.4.5"
 hmmlearn = "^0.3.0"
 flaml = "^2.3.3"
 autots = "^0.6.17"
+scikit-learn = "^1.6.1"
+pandas = "<2.0.0"
+numpy = "<2.0.0"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
