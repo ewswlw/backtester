@@ -152,7 +152,7 @@ def main():
     df = load_data(data_path)
     
     # Get price series for simple strategies
-    price_series = df['cad_ig_er_index']
+    price_series = df[config['data']['target_column']]
     
     # Initialize strategies
     strategies = {
@@ -160,6 +160,15 @@ def main():
         'HY Timing': HYTimingStrategy(config),
         'Buy & Hold': BuyAndHoldStrategy(config)
     }
+    
+    # Optimize MA strategy parameters
+    print("\nOptimizing MA strategy parameters...")
+    ma_strategy = strategies['MA']
+    optimal_params = ma_strategy.optimize_parameters(price_series)
+    print(f"\nOptimal parameters for MA strategy:")
+    print(f"MA Window: {optimal_params['ma_window']}")
+    print(f"Expected Sharpe: {optimal_params['sharpe']:.2f}")
+    print(f"Expected Total Return: {optimal_params['total_return']:.2%}")
     
     # Run strategies and collect results
     results = []

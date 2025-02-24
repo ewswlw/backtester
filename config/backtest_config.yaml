@@ -12,7 +12,7 @@ data:
 
 strategies:
   MA:
-    ma_window: 10
+    ma_window: 8  # Optimized value based on maximum Sharpe ratio
     entry_threshold: 0.001
   BuyAndHold:
     min_holding_period: 1

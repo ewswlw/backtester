@@ -37,3 +37,49 @@ class MovingAverageStrategy(StrategyBase):
         # Fill any missing values with previous signal
         signals = signals.astype(bool)
         return signals
+
+    def optimize_parameters(self, price_series: pd.Series) -> Dict[str, Any]:
+        """Optimize MA window parameter."""
+        results = []
+        
+        print("\nOptimizing MA window...")
+        # Test MA windows from 1 to 60 months
+        for window in range(1, 61):
+            self.ma_config.ma_window = window
+            signals = self.generate_signals(pd.DataFrame(price_series))
+            
+            # Calculate strategy returns
+            returns = price_series.pct_change().fillna(0)
+            strategy_returns = signals.shift(1) * returns  # Shift signals to avoid lookahead bias
+            
+            # Calculate metrics
+            total_return = (1 + strategy_returns).prod() - 1
+            ann_vol = strategy_returns.std() * np.sqrt(12)  # Annualize monthly volatility
+            sharpe = (total_return / ann_vol) if ann_vol != 0 else 0
+            
+            results.append({
+                'window': window,
+                'total_return': total_return,
+                'ann_vol': ann_vol,
+                'sharpe': sharpe
+            })
+            
+            if window % 10 == 0:
+                print(f"Tested window size: {window}")
+        
+        # Convert results to DataFrame for analysis
+        results_df = pd.DataFrame(results)
+        
+        # Find optimal window based on Sharpe ratio
+        optimal_window = results_df.loc[results_df['sharpe'].idxmax(), 'window']
+        print(f"\nOptimal MA window: {optimal_window}")
+        print(f"Max Sharpe ratio: {results_df['sharpe'].max():.2f}")
+        
+        # Update strategy parameter
+        self.ma_config.ma_window = int(optimal_window)
+        
+        return {
+            'ma_window': int(optimal_window),
+            'sharpe': results_df['sharpe'].max(),
+            'total_return': results_df.loc[results_df['sharpe'].idxmax(), 'total_return']
+        }
