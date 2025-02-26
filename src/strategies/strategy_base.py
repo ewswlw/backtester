@@ -60,6 +60,11 @@ class StrategyBase(ABC):
         else:
             data = price_series
             
+        # Ensure data is resampled to monthly if using monthly rebalancing
+        if self.config.rebalance_freq == 'M':
+            data = data.resample('M').last()
+            price_series = price_series.resample('M').last()
+            
         signals = self.generate_signals(data)
         
         # Ensure signals is a Series
@@ -78,6 +83,9 @@ class StrategyBase(ABC):
         # Normalize price series to start at 100
         price_series = 100 * price_series / price_series.iloc[0]
         
+        # Set frequency string based on actual data frequency
+        freq = '1M' if self.config.rebalance_freq == 'M' else '1D'
+        
         # Create portfolio
         portfolio = vbt.Portfolio.from_signals(
             close=price_series,
@@ -85,7 +93,7 @@ class StrategyBase(ABC):
             exits=exits,
             size=signals,  # Use original signals for position sizing
             init_cash=self.initial_capital,
-            freq='1D',  # Always use daily frequency
+            freq=freq,  # Use proper frequency string
             direction='longonly',  # Only long positions
             accumulate=False,  # Don't accumulate positions
             upon_long_conflict='ignore',  # Ignore new signals if already in position
