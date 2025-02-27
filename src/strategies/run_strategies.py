@@ -1,321 +1,586 @@
+"""
+Integrated script that combines raw_stats.py and strategy_comparison.py into one script.
+This script runs strategies, calculates statistics, and generates comparisons and visualizations.
+"""
+
 import os
-import sys
-import yaml
 import pandas as pd
 import numpy as np
-from typing import Dict, Any
-from pathlib import Path
+import sys
+import vectorbt as vbt
+import yaml
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Add project root to path for interactive window
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-if project_root not in sys.path:
-    sys.path.append(project_root)
+# Add project directory to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-# Try both import styles to support both script and interactive modes
-try:
-    from src.strategies.ma_strategy import MovingAverageStrategy
-    from src.strategies.buy_and_hold_strategy import BuyAndHoldStrategy
-    from src.strategies.hy_timing_strategy import HYTimingStrategy
-except ImportError:
-    from strategies.ma_strategy import MovingAverageStrategy
-    from strategies.buy_and_hold_strategy import BuyAndHoldStrategy
-    from strategies.hy_timing_strategy import HYTimingStrategy
+# Import strategies
+from src.strategies.ma_strategy import MovingAverageStrategy
+from src.strategies.hy_timing_strategy import HYTimingStrategy
+from src.strategies.mras_strategy import MRASStrategy
 
-def load_config() -> Dict[str, Any]:
-    """Load configuration from YAML file."""
-    config_path = Path(__file__).parent.parent.parent / 'config' / 'backtest_config.yaml'
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Convert relative path to absolute path
-    if 'data' in config and 'file_path' in config['data']:
-        config['data']['file_path'] = str(Path(__file__).parent.parent.parent / config['data']['file_path'])
-    
-    return config
+###########################################
+# Raw Stats Functions (from raw_stats.py)
+###########################################
 
-def load_data(data_path: str) -> pd.DataFrame:
-    """Load and prepare data for backtesting."""
-    print(f"\nLoading data from: {data_path}")
-    
-    # Load data
+def load_data(file_path):
+    """Load and preprocess data."""
     try:
-        df = pd.read_csv(data_path)
-        print(f"Successfully loaded CSV with shape: {df.shape}")
+        # Load CSV file
+        df = pd.read_csv(file_path)
         
-        # Convert Date column to datetime
-        df['Date'] = pd.to_datetime(df['Date'])
-        print(f"Date range: {df['Date'].min()} to {df['Date'].max()}")
-        
-        # Set Date as index
-        df.set_index('Date', inplace=True)
-        print("Set Date as index")
-        
-        # Sort by date
-        df.sort_index(inplace=True)
-        print("Sorted by date")
-        
-        # Handle duplicates - keep last observation for each month
-        df = df[~df.index.duplicated(keep='last')]
-        print(f"Removed duplicates, new shape: {df.shape}")
-        
-        # Forward fill missing values
-        df.fillna(method='ffill', inplace=True)
-        # Backward fill any remaining missing values at the start
-        df.fillna(method='bfill', inplace=True)
-        print("Filled missing values")
-        
-        # Print column names and data types
-        print("\nColumns and dtypes:")
-        for col in df.columns:
-            print(f"{col}: {df[col].dtype}")
-        
-        return df
-        
+        # Convert 'Date' column to datetime and set as index
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.set_index('Date', inplace=True)
+            
+            # Sort by date
+            df.sort_index(inplace=True)
+            
+            # Remove duplicates
+            df = df[~df.index.duplicated(keep='last')]
+            
+            # Fill missing values
+            df.fillna(method='ffill', inplace=True)
+            
+            print("\nSuccessfully loaded data with shape:", df.shape)
+            print(f"Date range: {df.index.min()} to {df.index.max()}")
+            
+            return df
+        else:
+            print("Error: 'Date' column not found in the CSV file.")
+            return None
     except Exception as e:
-        print(f"\nError loading data: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error loading data: {str(e)}")
         return None
 
-def analyze_portfolio(portfolio, name: str) -> pd.Series:
-    """Analyze portfolio performance and return key metrics."""
-    metrics = {}
-    metrics['Strategy'] = name
+def get_benchmark_stats(df, target_column, config, output_dir):
+    """Get raw VectorBT stats for the benchmark (buy and hold)."""
+    print("\n=== Calculating Buy & Hold Benchmark Stats ===")
     
-    # Get portfolio value series and returns
-    if hasattr(portfolio, 'value'):
-        value_series = portfolio.value()
-        returns = portfolio.returns()
-        
-        # Calculate basic metrics
-        total_return = ((value_series.iloc[-1] / value_series.iloc[0]) - 1) * 100
-        metrics['Total Return [%]'] = total_return
-        
-        # Calculate years
-        years = (value_series.index[-1] - value_series.index[0]).days / 365.25
-        ann_return = ((1 + total_return/100) ** (1/years) - 1) * 100
-        metrics['Annualized Return [%]'] = ann_return
-        
-        # Calculate volatility (adjust for monthly data)
-        monthly_vol = returns.std() * np.sqrt(12)
-        ann_vol = monthly_vol * 100
-        metrics['Annualized Volatility [%]'] = ann_vol
-        metrics['Sharpe Ratio'] = ann_return / ann_vol if ann_vol != 0 else 0
-        
-        # Calculate drawdown metrics
-        rolling_max = value_series.expanding().max()
-        drawdown = ((value_series - rolling_max) / rolling_max) * 100
-        metrics['Max Drawdown [%]'] = drawdown.min()
-        metrics['Calmar Ratio'] = abs(ann_return / metrics['Max Drawdown [%]']) if metrics['Max Drawdown [%]'] != 0 else float('inf')
-        
-        # Monthly metrics
-        monthly_returns = returns * 100
-        metrics['Monthly Win Rate [%]'] = (monthly_returns > 0).mean() * 100
-        metrics['Monthly Best Return [%]'] = monthly_returns.max()
-        metrics['Monthly Worst Return [%]'] = monthly_returns.min()
-        metrics['Avg Monthly Return [%]'] = monthly_returns.mean()
-        metrics['Monthly Volatility [%]'] = monthly_returns.std() * 100
-        
-    else:
-        # For non-portfolio series (e.g., benchmark), calculate basic metrics
-        value_series = portfolio
-        returns = value_series.pct_change().fillna(0)
-        
-        # Calculate basic metrics
-        total_return = ((value_series.iloc[-1] / value_series.iloc[0]) - 1) * 100
-        metrics['Total Return [%]'] = total_return
-        
-        # Calculate years
-        years = (value_series.index[-1] - value_series.index[0]).days / 365.25
-        ann_return = ((1 + total_return/100) ** (1/years) - 1) * 100
-        metrics['Annualized Return [%]'] = ann_return
-        
-        # Calculate volatility (adjust for monthly data)
-        monthly_vol = returns.std() * np.sqrt(12)
-        ann_vol = monthly_vol * 100
-        metrics['Annualized Volatility [%]'] = ann_vol
-        metrics['Sharpe Ratio'] = ann_return / ann_vol if ann_vol != 0 else 0
-        
-        # Calculate drawdown metrics
-        rolling_max = value_series.expanding().max()
-        drawdown = ((value_series - rolling_max) / rolling_max) * 100
-        metrics['Max Drawdown [%]'] = drawdown.min()
-        metrics['Calmar Ratio'] = abs(ann_return / metrics['Max Drawdown [%]']) if metrics['Max Drawdown [%]'] != 0 else float('inf')
-        
-        # Monthly metrics
-        monthly_returns = returns * 100
-        metrics['Monthly Win Rate [%]'] = (monthly_returns > 0).mean() * 100
-        metrics['Monthly Best Return [%]'] = monthly_returns.max()
-        metrics['Monthly Worst Return [%]'] = monthly_returns.min()
-        metrics['Avg Monthly Return [%]'] = monthly_returns.mean()
-        metrics['Monthly Volatility [%]'] = monthly_returns.std() * 100
+    # Get price series
+    price_series = df[target_column]
     
-    return pd.Series(metrics)
+    # Detect frequency
+    freq = pd.infer_freq(df.index)
+    print(f"Detected frequency: {freq}")
+    
+    # Create portfolio
+    portfolio = vbt.Portfolio.from_holding(
+        price_series,
+        init_cash=config['backtest_settings']['initial_capital'],
+        size=config['backtest_settings']['size'],
+        size_type=config['backtest_settings']['size_type'],
+        freq=freq if freq is not None else '1D'  # Default to daily if frequency cannot be inferred
+    )
+    
+    # Save portfolio stats
+    stats = portfolio.stats()
+    returns_stats = portfolio.returns_acc.stats()
+    
+    print("\nRaw Portfolio Stats for Buy & Hold:")
+    print("="*80)
+    print(stats)
+    
+    print("\nRaw Returns Stats for Buy & Hold:")
+    print("="*80)
+    print(returns_stats)
+    
+    # Save stats to file
+    stats_file = os.path.join(output_dir, 'benchmark_stats.txt')
+    with open(stats_file, 'w') as f:
+        f.write("Raw Portfolio Stats for Buy & Hold:\n")
+        f.write("="*80 + "\n")
+        f.write(stats.to_string())
+        f.write("\n\nRaw Returns Stats for Buy & Hold:\n")
+        f.write("="*80 + "\n")
+        f.write(returns_stats.to_string())
+    
+    return portfolio, stats, returns_stats, price_series, freq if freq is not None else '1D'
 
-def main():
-    """Main function to run all strategies."""
+def get_ma_strategy_stats(df, price_series, config, freq, output_dir):
+    """Get raw VectorBT stats for the MA strategy."""
+    print("\n=== Calculating Moving Average Strategy Stats ===")
+    
     try:
-        # Load configuration
-        config = load_config()
+        # Get MA window from config
+        ma_window = config['strategies']['MA']['ma_window']
         
-        # Load data
-        project_root_dir = Path(__file__).parent.parent.parent
-        data_path = project_root_dir / 'data_pipelines' / 'backtest_data.csv'
-        if not data_path.exists():
-            print(f"\nError: Data file not found at {data_path}")
-            print("Available files in data_pipelines directory:")
-            data_pipelines_dir = data_path.parent
-            for file in data_pipelines_dir.glob('*'):
-                print(f"- {file.name}")
-            return
+        # Calculate moving average
+        ma = price_series.rolling(window=ma_window).mean()
         
-        print(f"\nLoading data from: {data_path}")
-        df = load_data(str(data_path))
+        # Generate signals: buy when price > MA, sell when price < MA
+        signals = price_series > ma
         
-        if df is None or df.empty:
-            print("Error: Failed to load data or data is empty")
-            return
+        # Debug info
+        print(f"Original signal count: {len(signals)}")
+        print(f"Original signal changes: {(signals != signals.shift(1)).sum()}")
         
-        # Print data info
-        print("\nData Summary:")
-        print("-" * 80)
-        print(f"Shape: {df.shape}")
-        print(f"Date Range: {df.index[0]} to {df.index[-1]}")
-        print(f"Columns: {', '.join(df.columns)}")
+        # If rebalance frequency is monthly, resample signals to monthly frequency
+        if config['backtest_settings']['rebalance_freq'] == 'M':
+            print(f"Applying monthly rebalancing for MA strategy")
+            
+            # Create a new DataFrame with Date as index
+            signals_df = pd.DataFrame({'signal': signals})
+            signals_df.index.name = 'Date'
+            
+            # Print the first few rows to debug
+            print(f"Original signals head:\n{signals_df.head()}")
+            
+            # Resample to monthly frequency and take the last signal of each month
+            monthly_signals = signals_df.resample('M').last()
+            print(f"Monthly signals count: {len(monthly_signals)}")
+            print(f"Monthly signals head:\n{monthly_signals.head()}")
+            
+            # Forward fill the monthly signals to get daily signals
+            resampled_signals = monthly_signals.reindex(signals_df.index, method='ffill')
+            print(f"Resampled signals count: {len(resampled_signals)}")
+            print(f"Resampled signals head:\n{resampled_signals.head()}")
+            
+            # Convert back to Series
+            signals = resampled_signals['signal']
+            
+            # Debug info
+            print(f"Modified signal count: {len(signals)}")
+            print(f"Modified signal changes: {(signals != signals.shift(1)).sum()}")
         
-        # Get price series for simple strategies
-        price_series = df[config['data']['target_column']]
-        print(f"\nUsing target column: {config['data']['target_column']}")
+        # Generate entries and exits
+        entries = signals & ~signals.shift(1).fillna(False)
+        exits = ~signals & signals.shift(1).fillna(False)
         
-        # Initialize strategies
-        strategies = {
-            'MA': MovingAverageStrategy(config),
-            'HY Timing': HYTimingStrategy(config),
-            'Buy & Hold': BuyAndHoldStrategy(config)
-        }
+        # Debug info
+        print(f"Number of entries: {entries.sum()}")
+        print(f"Number of exits: {exits.sum()}")
         
-        # Run strategies and collect results
-        results = []
-        print("\nRunning strategies...")
+        # Create portfolio
+        ma_portfolio = vbt.Portfolio.from_signals(
+            price_series,
+            entries=entries,
+            exits=exits,
+            init_cash=config['backtest_settings']['initial_capital'],
+            size=config['backtest_settings']['size'],
+            size_type=config['backtest_settings']['size_type'],
+            freq=freq if freq is not None else '1D'
+        )
         
-        # First run buy & hold as benchmark
-        print("\nRunning Buy & Hold (Benchmark)...")
-        benchmark = strategies['Buy & Hold'].backtest(price_series)
-        benchmark_stats = analyze_portfolio(benchmark, 'Buy & Hold (Benchmark)')
-        results.append(benchmark_stats)
+        # Get portfolio stats
+        ma_stats = ma_portfolio.stats()
+        ma_returns_stats = ma_portfolio.returns_acc.stats()
         
-        # Run other strategies
-        for name, strategy in strategies.items():
-            if name == 'Buy & Hold':
-                continue
-                
-            print(f"\nRunning {name} strategy...")
-            try:
-                portfolio = strategy.backtest(price_series)
-                stats = analyze_portfolio(portfolio, name)
-                results.append(stats)
-                
-                # Print detailed portfolio stats
-                print(f"\n{name} Strategy Performance vs Benchmark:")
-                print("=" * 80)
-                print("\nKey Performance Metrics:")
-                print(f"{'Metric':<25} {'Strategy':>12} {'Benchmark':>12} {'Diff':>12}")
-                print("-" * 80)
-                
-                metrics_to_show = [
-                    ('Total Return', 'Total Return [%]', '%'),
-                    ('Ann. Return', 'Annualized Return [%]', '%'),
-                    ('Sharpe Ratio', 'Sharpe Ratio', ''),
-                    ('Max Drawdown', 'Max Drawdown [%]', '%')
-                ]
-                
-                for label, metric, suffix in metrics_to_show:
-                    strategy_val = stats[metric]
-                    benchmark_val = benchmark_stats[metric]
-                    diff = strategy_val - benchmark_val
-                    print(f"{label:<25} {strategy_val:>11.2f}{suffix} {benchmark_val:>11.2f}{suffix} {diff:>11.2f}{suffix}")
-                
-                print("\nMonthly Statistics:")
-                print("-" * 80)
-                monthly_metrics = [
-                    ('Win Rate', 'Monthly Win Rate [%]', '%'),
-                    ('Avg Return', 'Avg Monthly Return [%]', '%'),
-                    ('Monthly Vol', 'Monthly Volatility [%]', '%'),
-                    ('Best Month', 'Monthly Best Return [%]', '%'),
-                    ('Worst Month', 'Monthly Worst Return [%]', '%')
-                ]
-                
-                for label, metric, suffix in monthly_metrics:
-                    val = stats[metric]
-                    print(f"{label:<25} {val:>11.2f}{suffix}")
-            except Exception as e:
-                print(f"\nError running {name} strategy: {str(e)}")
-                import traceback
-                traceback.print_exc()
+        print("\nRaw Portfolio Stats for MA Strategy:")
+        print("="*80)
+        print(ma_stats)
         
-        # Create comparison DataFrame
-        comparison_df = pd.DataFrame(results)
-        comparison_df.set_index('Strategy', inplace=True)
+        print("\nRaw Returns Stats for MA Strategy:")
+        print("="*80)
+        print(ma_returns_stats)
         
-        # Sort metrics by importance
-        metric_order = [
-            'Total Return [%]', 'Annualized Return [%]', 'Annualized Volatility [%]',
-            'Sharpe Ratio', 'Calmar Ratio', 'Max Drawdown [%]',
-            'Monthly Win Rate [%]', 'Avg Monthly Return [%]', 'Monthly Volatility [%]',
-            'Monthly Best Return [%]', 'Monthly Worst Return [%]'
-        ]
-        comparison_df = comparison_df[metric_order]
+        # Save stats to files
+        with open(os.path.join(output_dir, "ma_portfolio_stats.txt"), 'w') as f:
+            f.write(str(ma_stats))
         
-        # Format the DataFrame for display
-        pd.set_option('display.float_format', lambda x: '{:,.2f}'.format(x))
-        pd.set_option('display.max_columns', None)
-        pd.set_option('display.width', 200)
-        pd.set_option('display.max_rows', None)
-        pd.set_option('display.expand_frame_repr', False)
-        pd.set_option('display.colheader_justify', 'right')
+        with open(os.path.join(output_dir, "ma_returns_stats.txt"), 'w') as f:
+            f.write(str(ma_returns_stats))
         
-        print("\nStrategy Comparison:")
-        print("=" * 120)
+        return ma_portfolio, ma_stats, ma_returns_stats
+    except Exception as e:
+        print(f"Error calculating MA strategy stats: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None
+
+def get_hy_strategy_stats(df, price_series, config, freq, output_dir):
+    """Get raw VectorBT stats for the HY Timing strategy."""
+    print("\n=== Calculating HY Timing Strategy Stats ===")
+    
+    try:
+        # Get HY MA window from config
+        hy_ma_window = config['strategies']['HYTiming']['ma_window']
         
-        # Rename columns for better readability
-        display_df = comparison_df.copy()
-        display_df.columns = [
-            'Total Return', 'Ann. Return', 'Ann. Vol',
-            'Sharpe', 'Calmar', 'Max DD',
-            'Win Rate', 'Avg Return', 'Monthly Vol',
-            'Best Month', 'Worst Month'
-        ]
+        # Get HY index column
+        hy_column = 'us_hy_er_index'
         
-        # Add % symbol to percentage columns
-        pct_columns = ['Total Return', 'Ann. Return', 'Ann. Vol', 'Max DD',
-                      'Win Rate', 'Avg Return', 'Monthly Vol', 'Best Month', 'Worst Month']
-        for col in pct_columns:
-            display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}%")
+        # Calculate moving average of HY index
+        hy_ma = df[hy_column].rolling(window=hy_ma_window).mean()
         
-        # Format ratio columns
-        ratio_columns = ['Sharpe', 'Calmar']
-        for col in ratio_columns:
-            display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}")
+        # Generate signals: buy when HY > MA, sell when HY < MA
+        signals = df[hy_column] > hy_ma
         
-        # Print with better formatting
-        print("\nFull Performance Comparison:")
-        print("-" * 120)
-        with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-            print(display_df.to_string())
-        print("-" * 120)
+        # Debug info
+        print(f"Original signal count: {len(signals)}")
+        print(f"Original signal changes: {(signals != signals.shift(1)).sum()}")
         
-        # Find best performing strategy
-        best_strategy = comparison_df.loc[comparison_df['Total Return [%]'].idxmax()]
-        print(f"\nBest Performing Strategy: {best_strategy.name}")
-        print(f"Total Return: {best_strategy['Total Return [%]']:.2f}%")
-        print(f"Annualized Return: {best_strategy['Annualized Return [%]']:.2f}%")
-        print(f"Sharpe Ratio: {best_strategy['Sharpe Ratio']:.2f}")
+        # If rebalance frequency is monthly, resample signals to monthly frequency
+        if config['backtest_settings']['rebalance_freq'] == 'M':
+            print(f"Applying monthly rebalancing for HY Timing strategy")
+            
+            # Create a new DataFrame with Date as index
+            signals_df = pd.DataFrame({'signal': signals})
+            signals_df.index.name = 'Date'
+            
+            # Print the first few rows to debug
+            print(f"Original signals head:\n{signals_df.head()}")
+            
+            # Resample to monthly frequency and take the last signal of each month
+            monthly_signals = signals_df.resample('M').last()
+            print(f"Monthly signals count: {len(monthly_signals)}")
+            print(f"Monthly signals head:\n{monthly_signals.head()}")
+            
+            # Forward fill the monthly signals to get daily signals
+            resampled_signals = monthly_signals.reindex(signals_df.index, method='ffill')
+            print(f"Resampled signals count: {len(resampled_signals)}")
+            print(f"Resampled signals head:\n{resampled_signals.head()}")
+            
+            # Convert back to Series
+            signals = resampled_signals['signal']
+            
+            # Debug info
+            print(f"Modified signal count: {len(signals)}")
+            print(f"Modified signal changes: {(signals != signals.shift(1)).sum()}")
+        
+        # Generate entries and exits
+        entries = signals & ~signals.shift(1).fillna(False)
+        exits = ~signals & signals.shift(1).fillna(False)
+        
+        # Debug info
+        print(f"Number of entries: {entries.sum()}")
+        print(f"Number of exits: {exits.sum()}")
+        
+        # Create portfolio
+        hy_portfolio = vbt.Portfolio.from_signals(
+            price_series,
+            entries=entries,
+            exits=exits,
+            init_cash=config['backtest_settings']['initial_capital'],
+            size=config['backtest_settings']['size'],
+            size_type=config['backtest_settings']['size_type'],
+            freq=freq if freq is not None else '1D'
+        )
+        
+        # Get portfolio stats
+        hy_stats = hy_portfolio.stats()
+        hy_returns_stats = hy_portfolio.returns_acc.stats()
+        
+        print("\nRaw Portfolio Stats for HY Timing Strategy:")
+        print("="*80)
+        print(hy_stats)
+        
+        print("\nRaw Returns Stats for HY Timing Strategy:")
+        print("="*80)
+        print(hy_returns_stats)
+        
+        # Save stats to files
+        with open(os.path.join(output_dir, "hy_portfolio_stats.txt"), 'w') as f:
+            f.write(str(hy_stats))
+        
+        with open(os.path.join(output_dir, "hy_returns_stats.txt"), 'w') as f:
+            f.write(str(hy_returns_stats))
+        
+        return hy_portfolio, hy_stats, hy_returns_stats
+    except Exception as e:
+        print(f"Error calculating HY Timing strategy stats: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None
+
+def get_mras_strategy_stats(df, price_series, config, freq, output_dir):
+    """Get raw VectorBT stats for the MRAS strategy."""
+    print("\n=== Calculating MRAS Strategy Stats ===")
+    
+    try:
+        # Create MRAS strategy instance and generate signals
+        mras_strategy = MRASStrategy(config)  # Pass only the config
+        
+        # The MRAS strategy expects a DataFrame with multiple columns, not just a price series
+        signals = mras_strategy.generate_signals(df)
+        
+        # Convert signals to boolean for vectorbt
+        signals_bool = signals > 0
+        
+        # Debug info
+        print(f"Original signal count: {len(signals_bool)}")
+        print(f"Original signal changes: {(signals_bool != signals_bool.shift(1)).sum()}")
+        
+        # If rebalance frequency is monthly, resample signals to monthly frequency
+        if config['backtest_settings']['rebalance_freq'] == 'M':
+            print(f"Applying monthly rebalancing for MRAS strategy")
+            
+            # Create a new DataFrame with Date as index
+            signals_df = pd.DataFrame({'signal': signals_bool})
+            signals_df.index.name = 'Date'
+            
+            # Print the first few rows to debug
+            print(f"Original signals head:\n{signals_df.head()}")
+            
+            # Resample to monthly frequency and take the last signal of each month
+            monthly_signals = signals_df.resample('M').last()
+            print(f"Monthly signals count: {len(monthly_signals)}")
+            print(f"Monthly signals head:\n{monthly_signals.head()}")
+            
+            # Forward fill the monthly signals to get daily signals
+            resampled_signals = monthly_signals.reindex(signals_df.index, method='ffill')
+            print(f"Resampled signals count: {len(resampled_signals)}")
+            print(f"Resampled signals head:\n{resampled_signals.head()}")
+            
+            # Convert back to Series
+            signals_bool = resampled_signals['signal']
+            
+            # Debug info
+            print(f"Modified signal count: {len(signals_bool)}")
+            print(f"Modified signal changes: {(signals_bool != signals_bool.shift(1)).sum()}")
+        
+        # Generate entries and exits
+        entries = signals_bool & ~signals_bool.shift(1).fillna(False)
+        exits = ~signals_bool & signals_bool.shift(1).fillna(False)
+        
+        # Debug info
+        print(f"Number of entries: {entries.sum()}")
+        print(f"Number of exits: {exits.sum()}")
+        
+        # Create portfolio
+        mras_portfolio = vbt.Portfolio.from_signals(
+            price_series,
+            entries=entries,
+            exits=exits,
+            init_cash=config['backtest_settings']['initial_capital'],
+            size=config['backtest_settings']['size'],
+            size_type=config['backtest_settings']['size_type'],
+            freq=freq if freq is not None else '1D'
+        )
+        
+        # Get portfolio stats
+        mras_stats = mras_portfolio.stats()
+        mras_returns_stats = mras_portfolio.returns_acc.stats()
+        
+        print("\nRaw Portfolio Stats for MRAS Strategy:")
+        print("="*80)
+        print(mras_stats)
+        
+        print("\nRaw Returns Stats for MRAS Strategy:")
+        print("="*80)
+        print(mras_returns_stats)
+        
+        # Save stats to file
+        stats_file = os.path.join(output_dir, 'mras_strategy_stats.txt')
+        with open(stats_file, 'w') as f:
+            f.write("Raw Portfolio Stats for MRAS Strategy:\n")
+            f.write("="*80 + "\n")
+            f.write(mras_stats.to_string())
+            f.write("\n\nRaw Returns Stats for MRAS Strategy:\n")
+            f.write("="*80 + "\n")
+            f.write(mras_returns_stats.to_string())
+        
+        return mras_portfolio, mras_stats, mras_returns_stats
         
     except Exception as e:
-        print(f"\nError running strategies: {str(e)}")
+        print(f"Error in MRAS strategy: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None
+
+def create_comparison_table(benchmark_stats, ma_stats, hy_stats, mras_stats):
+    """Create a comparison table of key metrics."""
+    # Define metrics to compare - make sure these match the actual keys in the stats objects
+    metrics = {
+        'Total Return [%]': lambda x: x.get('Total Return [%]', None) if x is not None else None,
+        'Annualized Return [%]': lambda x: x.get('Annualized Return [%]', None) if x is not None else None,
+        'Annualized Volatility [%]': lambda x: x.get('Annualized Volatility [%]', None) if x is not None else None,
+        'Sharpe Ratio': lambda x: x.get('Sharpe Ratio', None) if x is not None else None,
+        'Max Drawdown [%]': lambda x: x.get('Max Drawdown [%]', None) if x is not None else None,
+        'Calmar Ratio': lambda x: x.get('Calmar Ratio', None) if x is not None else None,
+        'Sortino Ratio': lambda x: x.get('Sortino Ratio', None) if x is not None else None
+    }
+    
+    # Create comparison table
+    comparison = {
+        'Benchmark': [metric(benchmark_stats) for metric in metrics.values()],
+        'MA Strategy': [metric(ma_stats) for metric in metrics.values()],
+        'HY Timing': [metric(hy_stats) for metric in metrics.values()]
+    }
+    
+    # Add MRAS strategy if available
+    if mras_stats is not None:
+        comparison['MRAS'] = [metric(mras_stats) for metric in metrics.values()]
+    
+    # Create DataFrame
+    comparison_df = pd.DataFrame(comparison, index=metrics.keys())
+    return comparison_df
+
+def run_comparison(output_dir, benchmark_returns, ma_returns, hy_returns, mras_returns, 
+                  benchmark_stats, ma_stats, hy_stats, mras_stats):
+    """Run the strategy comparison."""
+    try:
+        print("\nCreating comparison tables...")
+        
+        # Create comparison table
+        returns_comparison = create_comparison_table(benchmark_returns, ma_returns, hy_returns, mras_returns)
+        stats_comparison = create_comparison_table(benchmark_stats, ma_stats, hy_stats, mras_stats)
+        
+        # Print comparison tables
+        print("\nReturns Comparison:")
+        print("="*80)
+        print(returns_comparison)
+        
+        print("\nStats Comparison:")
+        print("="*80)
+        print(stats_comparison)
+        
+        # Save comparison tables
+        returns_comparison.to_csv(os.path.join(output_dir, 'returns_comparison.csv'))
+        stats_comparison.to_csv(os.path.join(output_dir, 'stats_comparison.csv'))
+        
+        # Create visualizations
+        print("\nCreating visualizations...")
+        
+        # Save comparison tables as HTML
+        returns_comparison.to_html(os.path.join(output_dir, 'returns_comparison.html'))
+        stats_comparison.to_html(os.path.join(output_dir, 'stats_comparison.html'))
+        
+        print("\nAll comparisons saved to", output_dir)
+        
+    except Exception as e:
+        print(f"Error in comparison: {str(e)}")
         import traceback
         traceback.print_exc()
 
+def run_raw_stats(project_root, config):
+    """Run the raw stats calculations."""
+    print("\n" + "="*80)
+    print("STEP 1: Running raw_stats.py to generate strategy statistics")
+    print("="*80 + "\n")
+    
+    # Load data
+    data_path = os.path.join(project_root, config['data']['file_path'])
+    df = load_data(data_path)
+    
+    if df is None:
+        print("Error: Failed to load data.")
+        return None
+    
+    # Get target column
+    target_column = config['data']['target_column']
+    print(f"\nAnalyzing target column: {target_column}")
+    
+    # Set up output directory
+    output_dir = os.path.join(project_root, 'results')
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Calculate stats for each strategy
+    benchmark_portfolio, benchmark_stats, benchmark_returns, price_series, freq = get_benchmark_stats(df, target_column, config, output_dir)
+    ma_portfolio, ma_stats, ma_returns = get_ma_strategy_stats(df, price_series, config, freq, output_dir)
+    hy_portfolio, hy_stats, hy_returns = get_hy_strategy_stats(df, price_series, config, freq, output_dir)
+    mras_portfolio, mras_stats, mras_returns = get_mras_strategy_stats(df, price_series, config, freq, output_dir)
+    
+    print("\nSaved all stats to", output_dir)
+    
+    return (benchmark_portfolio, ma_portfolio, hy_portfolio, mras_portfolio,
+            benchmark_stats, ma_stats, hy_stats, mras_stats,
+            benchmark_returns, ma_returns, hy_returns, mras_returns)
+
+def main():
+    """Main function to run and analyze strategies."""
+    try:
+        # Get project root directory
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        
+        # Load config
+        config_path = os.path.join(project_root, 'config', 'backtest_config.yaml')
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        print("\n" + "="*80)
+        print("BACKTESTING FRAMEWORK INTEGRATED SYSTEM")
+        print("="*80)
+        
+        print("\nThis script integrates the raw_stats.py and strategy_comparison.py functionality")
+        print("It demonstrates the relationship between all components of the system\n")
+        
+        print("="*80)
+        print("STEP 1: Running raw_stats.py to generate strategy statistics")
+        print("="*80)
+        
+        print("\nExecuting raw_stats.py...")
+        
+        # Run raw stats
+        results = run_raw_stats(project_root, config)
+        if results is None:
+            print("Error: Failed to run raw statistics.")
+            return
+            
+        (benchmark_portfolio, ma_portfolio, hy_portfolio, mras_portfolio,
+         benchmark_stats, ma_stats, hy_stats, mras_stats,
+         benchmark_returns, ma_returns, hy_returns, mras_returns) = results
+        
+        print("\n" + "="*80)
+        print("STEP 2: Running strategy_comparison.py to compare strategies")
+        print("="*80)
+        
+        print("\nExecuting strategy_comparison.py...")
+        
+        run_comparison(os.path.join(project_root, 'results'), 
+                      benchmark_returns, ma_returns, hy_returns, mras_returns,
+                      benchmark_stats, ma_stats, hy_stats, mras_stats)
+        
+        print("\n" + "="*80)
+        print("BACKTESTING COMPLETE")
+        print("="*80)
+        
+        print("\nAll statistics and comparisons have been generated in the /results directory")
+        print("\nThe integration demonstrates how the whole system works together:")
+        print("1. raw_stats.py - Runs strategies and generates raw statistics")
+        print("2. strategy_comparison.py - Compares all strategies and creates visualizations")
+        print("3. run_strategies.py - Orchestrates the overall system")
+        
+        # Save all output to integrated_output.txt
+        output_file = os.path.join(project_root, 'results', 'integrated_output.txt')
+        with open(output_file, 'w') as f:
+            # Re-run everything to capture output
+            # This is a bit inefficient but ensures we get clean output
+            import io
+            from contextlib import redirect_stdout
+            
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                print("\n" + "="*80)
+                print("BACKTESTING FRAMEWORK INTEGRATED SYSTEM")
+                print("="*80)
+                
+                print("\nThis script integrates the raw_stats.py and strategy_comparison.py functionality")
+                print("It demonstrates the relationship between all components of the system\n")
+                
+                print("="*80)
+                print("STEP 1: Running raw_stats.py to generate strategy statistics")
+                print("="*80)
+                
+                # Re-run raw stats for output capture
+                run_raw_stats(project_root, config)
+                
+                print("\n" + "="*80)
+                print("STEP 2: Running strategy_comparison.py to compare strategies")
+                print("="*80)
+                
+                run_comparison(os.path.join(project_root, 'results'), 
+                              benchmark_returns, ma_returns, hy_returns, mras_returns,
+                              benchmark_stats, ma_stats, hy_stats, mras_stats)
+                
+                print("\n" + "="*80)
+                print("BACKTESTING COMPLETE")
+                print("="*80)
+                
+                print("\nAll statistics and comparisons have been generated in the /results directory")
+                print("\nThe integration demonstrates how the whole system works together:")
+                print("1. raw_stats.py - Runs strategies and generates raw statistics")
+                print("2. strategy_comparison.py - Compares all strategies and creates visualizations")
+                print("3. run_strategies.py - Orchestrates the overall system")
+            
+            # Write the captured output to the file
+            f.write(buffer.getvalue())
+        
+    except Exception as e:
+        import traceback
+        print(f"\nError running strategies: {str(e)}")
+        traceback.print_exc()
+        
 if __name__ == "__main__":
     main()

@@ -16,8 +16,35 @@ class MovingAverageStrategy(StrategyBase):
     
     def __init__(self, config: Dict[str, Any]):
         """Initialize MA strategy."""
-        super().__init__(BacktestConfig(**config['backtest_settings']))
-        self.ma_config = MAConfig(**config['strategies']['MA'])
+        # Create a full config for the parent class using the settings from the actual config file
+        if 'backtest_settings' in config:
+            # Original format with full config structure
+            super().__init__(BacktestConfig(**config['backtest_settings']))
+            if 'strategies' in config and 'MA' in config['strategies']:
+                self.ma_config = MAConfig(**config['strategies']['MA'])
+            else:
+                self.ma_config = MAConfig()
+        else:
+            # Simplified format with just the MA parameters directly
+            # We need to pass the parent config separately
+            import os
+            
+            # Create a simple BacktestConfig with default values
+            backtest_config = BacktestConfig(
+                start_date="",
+                end_date="",
+                rebalance_freq="M",
+                initial_capital=100.0,
+                size=1.0,
+                size_type="percent"
+            )
+            super().__init__(backtest_config)
+            
+            # Use the passed config directly for MA parameters
+            self.ma_config = MAConfig(
+                ma_window=config.get('ma_window', 20),
+                entry_threshold=config.get('entry_threshold', 0.0)
+            )
     
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
         """Generate trading signals based on moving average crossover."""

@@ -59,11 +59,22 @@ class StrategyBase(ABC):
             data = price_series.to_frame()
         else:
             data = price_series
+        
+        # Detect data frequency
+        dates = data.index
+        if len(dates) > 1:
+            avg_days = (dates[-1] - dates[0]).days / (len(dates) - 1)
+            freq = '1M' if avg_days > 25 else '1D'
+            print(f"Using detected frequency: {freq}")
+        else:
+            freq = '1M'  # Default to monthly if can't determine
+            print(f"Using default frequency: {freq}")
             
         # Ensure data is resampled to monthly if using monthly rebalancing
-        if self.config.rebalance_freq == 'M':
+        if hasattr(self.config, 'rebalance_freq') and self.config.rebalance_freq == 'M':
             data = data.resample('M').last()
             price_series = price_series.resample('M').last()
+            freq = '1M'  # Ensure frequency is monthly
             
         signals = self.generate_signals(data)
         
@@ -83,9 +94,6 @@ class StrategyBase(ABC):
         # Normalize price series to start at 100
         price_series = 100 * price_series / price_series.iloc[0]
         
-        # Set frequency string based on actual data frequency
-        freq = '1M' if self.config.rebalance_freq == 'M' else '1D'
-        
         # Create portfolio
         portfolio = vbt.Portfolio.from_signals(
             close=price_series,
@@ -99,10 +107,8 @@ class StrategyBase(ABC):
             upon_long_conflict='ignore',  # Ignore new signals if already in position
             upon_dir_conflict='ignore',  # Ignore signals in opposite direction
             upon_opposite_entry='ignore',  # Ignore entry signals in opposite direction
-            log=True  # Enable logging for debugging
         )
         
-        # Store portfolio for later analysis
         self._portfolio = portfolio
         self._signals = signals
         

@@ -18,3 +18,13 @@ strategies:
     min_holding_period: 1
   HYTiming:
     ma_window: 5  # Default value, will be optimized
+  MRAS:
+    regime_ma_window: 60
+    regime_vol_window: 20
+    momentum_window: 20
+    hy_ma_window: 5
+    yield_ma_window: 20
+    vol_threshold: 0.15
+    momentum_threshold: 0.0
+    vol_target: 0.10
+    max_leverage: 1.0

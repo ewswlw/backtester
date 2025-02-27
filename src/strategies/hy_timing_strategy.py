@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any
+import vectorbt as vbt
 
 class HYTimingStrategy:
     """Strategy that times CAD IG based on US HY excess returns MA signal."""
@@ -8,7 +9,39 @@ class HYTimingStrategy:
     def __init__(self, config: Dict[str, Any]):
         """Initialize strategy with configuration."""
         self.config = config
-        self.ma_window = config['strategies'].get('HYTiming', {}).get('ma_window', 5)
+        
+        # Handle both full config and simplified config structure
+        if 'strategies' in config and 'HYTiming' in config['strategies']:
+            # Full config structure
+            self.ma_window = config['strategies']['HYTiming'].get('ma_window', 5)
+        elif 'window' in config:
+            # Simplified config structure
+            self.ma_window = config['window']
+            
+            # Use a local copy of config
+            import os
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                      'config', 'backtest_config.yaml')
+            
+            # We'll use default parameter values if config can't be loaded
+            try:
+                import yaml
+                with open(config_path, 'r') as file:
+                    self.config = yaml.safe_load(file)
+            except Exception as e:
+                print(f"Warning: Could not load config file. Using default values: {str(e)}")
+                self.config = {
+                    'backtest_settings': {
+                        'initial_capital': 100.0
+                    },
+                    'data': {
+                        'file_path': 'backtest_data.csv'
+                    }
+                }
+        else:
+            # Default
+            self.ma_window = 5
+            
         self._data = None
         
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:

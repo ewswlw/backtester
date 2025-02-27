@@ -1,0 +1,29 @@
+Start                         2002-10-31 00:00:00
+End                           2025-02-27 00:00:00
+Period                         5902 days 00:00:00
+Start Value                                 100.0
+End Value                              134.388544
+Total Return [%]                        34.388544
+Benchmark Return [%]                    34.388544
+Max Gross Exposure [%]                      100.0
+Total Fees Paid                               0.0
+Max Drawdown [%]                        15.481159
+Max Drawdown Duration          1035 days 00:00:00
+Total Trades                                    1
+Total Closed Trades                             0
+Total Open Trades                               1
+Open Trade PnL                          34.388544
+Win Rate [%]                                  NaN
+Best Trade [%]                                NaN
+Worst Trade [%]                               NaN
+Avg Winning Trade [%]                         NaN
+Avg Losing Trade [%]                          NaN
+Avg Winning Trade Duration                    NaT
+Avg Losing Trade Duration                     NaT
+Profit Factor                                 NaN
+Expectancy                                    NaN
+Sharpe Ratio                             1.044043
+Calmar Ratio                             0.119157
+Omega Ratio                              1.229312
+Sortino Ratio                            1.381408
+Name: cad_ig_er_index, dtype: object
