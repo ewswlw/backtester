@@ -7,7 +7,7 @@ backtest_settings:
   size_type: 'value'  # Using value for fixed position size
 
 data:
-  file_path: 'pulling_data/backtest_data.csv'
+  file_path: 'data_pipelines/backtest_data.csv'
   target_column: 'cad_ig_er_index'
 
 strategies:
